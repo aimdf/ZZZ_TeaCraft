@@ -1,51 +1,24 @@
+// ==================== Файл: ZZZ_teacraft.java ====================
 package com.zzz;
 
-import org.bukkit.*;
-import org.bukkit.block.Block;
-import org.bukkit.block.BlockFace;
-import org.bukkit.entity.ItemFrame;
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.player.PlayerInteractEntityEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerItemConsumeEvent;
-import org.bukkit.inventory.EquipmentSlot;
+import com.zzz.listeners.*;
+import com.zzz.tasks.*;
+import com.zzz.commands.TeaCraftCommand;
+import com.zzz.commands.TeaCraftTabCompleter;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.inventory.ShapelessRecipe;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
-import java.util.concurrent.ThreadLocalRandom;
 
-import java.util.Iterator;
-import java.io.File;
-import java.sql.*;
+import java.sql.Connection;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class ZZZ_teacraft extends JavaPlugin implements Listener {
+public final class ZZZ_teacraft extends JavaPlugin {
 
-    // Константы
-    private static final int GROW_TIME = 300; // 5 минут в секундах (300 * 20 = 6000 тиков)
-    private static final int DRY_TIME = 300; // 5 минут для сушки
-    private static final int BUZZ_INCREMENT = 20;
-    private static final int WATER_REDUCTION = 30;
-    private static final int NATURAL_DECAY = 1;
-    private static final long DECAY_INTERVAL = 1200; // 1 минута в тиках
-
-    // NamespacedKeys для NBT
+    // ==================== NamespacedKeys ====================
     private NamespacedKey teaBushKey;
     private NamespacedKey teaFruitKey;
     private NamespacedKey teaDryKey;
@@ -53,46 +26,41 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
     private NamespacedKey drynessKey;
     private NamespacedKey plantTimeKey;
 
-    // База данных
+    // ==================== База данных ====================
     private Connection connection;
     private final Map<Location, TeaBushData> teaBushes = new ConcurrentHashMap<>();
 
-    // Шкала напыханости
+    // ==================== Шкала напыханости ====================
     private final Map<UUID, Integer> buzzLevels = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastEffectTime = new ConcurrentHashMap<>();
+
+    // ==================== Хранилища для эффектов ====================
+    private final Map<UUID, String> distortedNames = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> nameDistortExpiry = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<Integer, String>> itemRenames = new ConcurrentHashMap<>();
+
+    // ==================== Таски ====================
     private BukkitTask buzzTask;
+    private BukkitTask jumpTask;
+    private BukkitTask shakeTask;
+    private BukkitTask speedWarpTask;
+    private BukkitTask soundTask;
+    private BukkitTask particleTask;
+    private BukkitTask phantomParticleTask;
+    private BukkitTask itemRenameTask;
+    private BukkitTask bushGrowthTask;
+    private BukkitTask itemFrameCheckTask;
+    private BukkitTask cleanupTask;
 
     @Override
     public void onEnable() {
-        // Инициализация NamespacedKeys
-        teaBushKey = new NamespacedKey(this, "tea_bush");
-        teaFruitKey = new NamespacedKey(this, "tea_fruit");
-        teaDryKey = new NamespacedKey(this, "tea_dry");
-        teaJointKey = new NamespacedKey(this, "tea_joint");
-        drynessKey = new NamespacedKey(this, "dryness");
-        plantTimeKey = new NamespacedKey(this, "plant_time");
-
-        getServer().getPluginManager().registerEvents(this, this);
-
-        // Инициализация БД
+        initNamespacedKeys();
+        registerListeners();
         initDatabase();
-
-        // Загрузка кустов из БД
         loadTeaBushes();
-
-        // Запуск задач
-        startBushGrowthTask();
-        startItemFrameCheckTask();
-        startBuzzEffectsTask();
-        startParticleTask();          // Постоянное обновление частиц для зрелых кустов
-        startCleanupInvalidBushes(); // Периодическая очистка невалидных кустов
-
-        // Регистрация команд
-        Objects.requireNonNull(getCommand("teacraft")).setExecutor(new TeaCraftCommand(this));
-        Objects.requireNonNull(getCommand("teacraft")).setTabCompleter(new TeaCraftTabCompleter());
-
-        // Регистрация крафта
+        startAllTasks();
+        registerCommands();
         registerRecipes();
-
         getLogger().info("ZZZ_TeaCraft включен!");
     }
 
@@ -100,982 +68,102 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
     public void onDisable() {
         saveAllTeaBushes();
         closeDatabase();
+        cancelAllTasks();
         getLogger().info("ZZZ_TeaCraft выключен!");
     }
 
-    // ==================== КЛАССЫ ДАННЫХ ====================
-
-    public static class TeaBushData {
-        private final Location location;
-        private long plantTime;
-        private boolean isMature;
-
-        public TeaBushData(Location location, long plantTime, boolean isMature) {
-            this.location = location;
-            this.plantTime = plantTime;
-            this.isMature = isMature;
-        }
-
-        public Location getLocation() {
-            return location;
-        }
-
-        public long getPlantTime() {
-            return plantTime;
-        }
-
-        public boolean isMature() {
-            return isMature;
-        }
-
-        public void setMature(boolean mature) {
-            isMature = mature;
-        }
-
-        public void setPlantTime(long plantTime) {
-            this.plantTime = plantTime;
-        }
-
-        public int getGrowthProgress() {
-            long elapsed = (System.currentTimeMillis() - plantTime) / 1000;
-            return Math.min(100, (int) ((elapsed * 100) / GROW_TIME));
-        }
+    private void initNamespacedKeys() {
+        teaBushKey = new NamespacedKey(this, "tea_bush");
+        teaFruitKey = new NamespacedKey(this, "tea_fruit");
+        teaDryKey = new NamespacedKey(this, "tea_dry");
+        teaJointKey = new NamespacedKey(this, "tea_joint");
+        drynessKey = new NamespacedKey(this, "dryness");
+        plantTimeKey = new NamespacedKey(this, "plant_time");
     }
 
-    // ==================== КОМАНДЫ ====================
-
-    public static class TeaCraftCommand implements org.bukkit.command.CommandExecutor {
-        private final ZZZ_teacraft plugin;
-
-        public TeaCraftCommand(ZZZ_teacraft plugin) {
-            this.plugin = plugin;
-        }
-
-        @Override
-        public boolean onCommand(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command,
-                                 String label, String[] args) {
-            if (!sender.hasPermission("teacraft.admin")) {
-                sender.sendMessage(ChatColor.RED + "У вас нет прав для этой команды!");
-                return true;
-            }
-
-            if (args.length == 0) {
-                sender.sendMessage(ChatColor.GOLD + "=== ZZZ_TeaCraft Admin Commands ===");
-                sender.sendMessage(ChatColor.YELLOW + "/teacraft give <игрок> <предмет> [количество]");
-                sender.sendMessage(ChatColor.YELLOW + "/teacraft bushinfo");
-                sender.sendMessage(ChatColor.YELLOW + "/teacraft setstage <рост/зрелый>");
-                return true;
-            }
-
-            switch (args[0].toLowerCase()) {
-                case "give":
-                    return handleGiveCommand(sender, args);
-                case "bushinfo":
-                    return handleBushInfoCommand(sender);
-                case "setstage":
-                    return handleSetStageCommand(sender, args);
-                default:
-                    sender.sendMessage(ChatColor.RED + "Неизвестная подкоманда!");
-                    return true;
-            }
-        }
-
-        private boolean handleGiveCommand(org.bukkit.command.CommandSender sender, String[] args) {
-            if (args.length < 3) {
-                sender.sendMessage(ChatColor.RED + "Использование: /teacraft give <игрок> <предмет> [количество]");
-                return true;
-            }
-
-            Player target = Bukkit.getPlayer(args[1]);
-            if (target == null) {
-                sender.sendMessage(ChatColor.RED + "Игрок не найден!");
-                return true;
-            }
-
-            String itemType = args[2].toLowerCase();
-            int amount = args.length > 3 ? Integer.parseInt(args[3]) : 1;
-
-            ItemStack item = null;
-            switch (itemType) {
-                case "bush":
-                case "куст":
-                    item = plugin.createTeaBushItem();
-                    break;
-                case "fruit":
-                case "плод":
-                    item = plugin.createTeaFruitItem(0);
-                    break;
-                case "dry":
-                case "сухой":
-                    item = plugin.createDryTeaItem();
-                    break;
-                case "joint":
-                case "скрутка":
-                    item = plugin.createTeaJointItem();
-                    break;
-                default:
-                    sender.sendMessage(ChatColor.RED + "Неизвестный предмет! Доступны: bush, fruit, dry, joint");
-                    return true;
-            }
-
-            item.setAmount(amount);
-            target.getInventory().addItem(item);
-            sender.sendMessage(ChatColor.GREEN + "Выдано " + amount + "x " + itemType + " игроку " + target.getName());
-            return true;
-        }
-
-        private boolean handleBushInfoCommand(org.bukkit.command.CommandSender sender) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок!");
-                return true;
-            }
-
-            Block targetBlock = player.getTargetBlockExact(5);
-            if (targetBlock == null || targetBlock.getType() != Material.FERN) {
-                player.sendMessage(ChatColor.RED + "Вы не смотрите на куст чая!");
-                return true;
-            }
-
-            TeaBushData bushData = plugin.teaBushes.get(targetBlock.getLocation());
-            if (bushData == null) {
-                player.sendMessage(ChatColor.RED + "Это не куст чая!");
-                return true;
-            }
-
-            player.sendMessage(ChatColor.GOLD + "=== Информация о кусте ===");
-            player.sendMessage(ChatColor.YELLOW + "Стадия: " + ChatColor.WHITE +
-                    (bushData.isMature() ? "§aЗрелый" : "§eРастет"));
-            player.sendMessage(ChatColor.YELLOW + "Прогресс: " + ChatColor.WHITE +
-                    bushData.getGrowthProgress() + "%");
-            return true;
-        }
-
-        private boolean handleSetStageCommand(org.bukkit.command.CommandSender sender, String[] args) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage(ChatColor.RED + "Эту команду может использовать только игрок!");
-                return true;
-            }
-
-            if (args.length < 2) {
-                player.sendMessage(ChatColor.RED + "Использование: /teacraft setstage <рост/зрелый>");
-                return true;
-            }
-
-            Block targetBlock = player.getTargetBlockExact(5);
-            if (targetBlock == null || targetBlock.getType() != Material.FERN) {
-                player.sendMessage(ChatColor.RED + "Вы не смотрите на куст чая!");
-                return true;
-            }
-
-            TeaBushData bushData = plugin.teaBushes.get(targetBlock.getLocation());
-            if (bushData == null) {
-                player.sendMessage(ChatColor.RED + "Это не куст чая!");
-                return true;
-            }
-
-            String stage = args[1].toLowerCase();
-            if (stage.equals("рост") || stage.equals("grow")) {
-                bushData.setMature(false);
-                bushData.setPlantTime(System.currentTimeMillis() - (GROW_TIME * 500L)); // 50% прогресса
-                plugin.removeParticles(bushData.getLocation());
-                player.sendMessage(ChatColor.GREEN + "Куст переведен в стадию роста!");
-            } else if (stage.equals("зрелый") || stage.equals("mature")) {
-                bushData.setMature(true);
-                plugin.spawnParticles(bushData.getLocation());
-                player.sendMessage(ChatColor.GREEN + "Куст переведен в зрелую стадию!");
-            } else {
-                player.sendMessage(ChatColor.RED + "Неверная стадия! Доступны: рост/зрелый");
-                return true;
-            }
-
-            plugin.saveTeaBush(bushData);
-            return true;
-        }
-    }
-    @EventHandler
-    public void onGrassBreak(BlockBreakEvent event) {
-        Block block = event.getBlock();
-        Material type = block.getType();
-
-        // Проверяем, что это трава или высокая трава
-        if (type == Material.SHORT_GRASS ||
-                type == Material.TALL_GRASS ||
-                type == Material.FERN ||
-                type == Material.LARGE_FERN) {
-
-            // Проверяем, что это НЕ наш культурный куст чая
-            if (teaBushes.containsKey(block.getLocation())) {
-                return; // Это наш посаженный куст, пропускаем
-            }
-
-            // Шанс 5% на выпадение саженца чая
-            Random random = new Random();
-            if (random.nextInt(100) < 5) {
-                // Отменяем стандартное выпадение предметов
-                event.setDropItems(false);
-
-                // Уничтожаем блок без звука и эффектов
-                block.setType(Material.AIR);
-
-                // Спавним наш куст чая
-                block.getWorld().dropItemNaturally(
-                        block.getLocation().add(0.5, 0.5, 0.5),
-                        createTeaBushItem()
-                );
-
-                // Добавляем частицы для визуального эффекта
-                block.getWorld().spawnParticle(
-                        Particle.HAPPY_VILLAGER,
-                        block.getLocation().add(0.5, 0.5, 0.5),
-                        10, 0.3, 0.3, 0.3, 0.1
-                );
-            }
-        }
+    private void registerListeners() {
+        getServer().getPluginManager().registerEvents(new PlantListener(this), this);
+        getServer().getPluginManager().registerEvents(new BuzzListener(this), this);
+        getServer().getPluginManager().registerEvents(new CraftListener(this), this);
+        getServer().getPluginManager().registerEvents(new EffectListener(this), this);
     }
 
-    public static class TeaCraftTabCompleter implements org.bukkit.command.TabCompleter {
-        @Override
-        public List<String> onTabComplete(org.bukkit.command.CommandSender sender,
-                                          org.bukkit.command.Command command,
-                                          String alias, String[] args) {
-            if (args.length == 1) {
-                return Arrays.asList("give", "bushinfo", "setstage");
-            }
-
-            if (args.length == 2 && args[0].equalsIgnoreCase("give")) {
-                return null; // Предложит список игроков
-            }
-
-            if (args.length == 3 && args[0].equalsIgnoreCase("give")) {
-                return Arrays.asList("bush", "fruit", "dry", "joint");
-            }
-
-            if (args.length == 2 && args[0].equalsIgnoreCase("setstage")) {
-                return Arrays.asList("рост", "зрелый");
-            }
-
-            return Collections.emptyList();
-        }
+    private void registerCommands() {
+        Objects.requireNonNull(getCommand("teacraft")).setExecutor(new TeaCraftCommand(this));
+        Objects.requireNonNull(getCommand("teacraft")).setTabCompleter(new TeaCraftTabCompleter());
     }
 
-
-    // ==================== МЕТОДЫ СОЗДАНИЯ ПРЕДМЕТОВ ====================
-
-    public ItemStack createTeaBushItem() {
-        ItemStack item = new ItemStack(Material.FERN);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(ChatColor.GREEN + "Куст чая");
-        meta.setLore(Arrays.asList(
-                ChatColor.GRAY + "Посадите на землю",
-                ChatColor.GRAY + "Время роста: 5 минут"
-        ));
-        meta.getPersistentDataContainer().set(teaBushKey, PersistentDataType.BOOLEAN, true);
-        item.setItemMeta(meta);
-        return item;
+    private void startAllTasks() {
+        bushGrowthTask = new BushGrowthTask(this).runTaskTimer(this, 20L, 20L);
+        itemFrameCheckTask = new ItemFrameCheckTask(this).runTaskTimer(this, 20L, 100L);
+        buzzTask = new BuzzDecayTask(this).runTaskTimer(this, 0L, Constants.DECAY_INTERVAL);
+        particleTask = new ParticleTask(this).runTaskTimer(this, 60L, 30L);
+        cleanupTask = new CleanupTask(this).runTaskTimer(this, 200L, 6000L);
+        jumpTask = new JumpTask(this).runTaskTimer(this, 20L, 1L);
+        shakeTask = new ShakeTask(this).runTaskTimer(this, 20L, 1L);
+        speedWarpTask = new SpeedWarpTask(this).runTaskTimer(this, 20L, 1L);
+        soundTask = new SoundTask(this).runTaskTimer(this, 20L, 1L);
+        phantomParticleTask = new PhantomParticleTask(this).runTaskTimer(this, 20L, 1L);
+        itemRenameTask = new ItemRenameTask(this).runTaskTimer(this, 20L, 200L);
     }
 
-    public ItemStack createTeaFruitItem(int dryness) {
-        ItemStack item = new ItemStack(Material.SHORT_GRASS);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(ChatColor.WHITE + "Плод чая");
-
-        List<String> lore = new ArrayList<>();
-        lore.add(ChatColor.GRAY + "Сырье для сушки");
-        if (dryness > 0) {
-            lore.add(ChatColor.GRAY + "Сушка: " + getProgressBar(dryness) +
-                    ChatColor.WHITE + " " + dryness + "%");
-        }
-        meta.setLore(lore);
-
-        PersistentDataContainer pdc = meta.getPersistentDataContainer();
-        pdc.set(teaFruitKey, PersistentDataType.BOOLEAN, true);
-        if (dryness > 0) {
-            pdc.set(drynessKey, PersistentDataType.INTEGER, dryness);
-        }
-
-        item.setItemMeta(meta);
-        return item;
+    private void cancelAllTasks() {
+        if (bushGrowthTask != null) bushGrowthTask.cancel();
+        if (itemFrameCheckTask != null) itemFrameCheckTask.cancel();
+        if (buzzTask != null) buzzTask.cancel();
+        if (particleTask != null) particleTask.cancel();
+        if (cleanupTask != null) cleanupTask.cancel();
+        if (jumpTask != null) jumpTask.cancel();
+        if (shakeTask != null) shakeTask.cancel();
+        if (speedWarpTask != null) speedWarpTask.cancel();
+        if (soundTask != null) soundTask.cancel();
+        if (phantomParticleTask != null) phantomParticleTask.cancel();
+        if (itemRenameTask != null) itemRenameTask.cancel();
     }
-
-    public ItemStack createDryTeaItem() {
-        ItemStack item = new ItemStack(Material.DEAD_BUSH);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(ChatColor.YELLOW + "Сухой чай");
-        meta.setLore(Arrays.asList(
-                ChatColor.GRAY + "Высушенный чайный лист",
-                ChatColor.GRAY + "Используется для скруток"
-        ));
-        meta.getPersistentDataContainer().set(teaDryKey, PersistentDataType.BOOLEAN, true);
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    public ItemStack createTeaJointItem() {
-        ItemStack item = new ItemStack(Material.FIREWORK_ROCKET);
-        ItemMeta meta = item.getItemMeta();
-        meta.setDisplayName(ChatColor.LIGHT_PURPLE + "Чайная скрутка");
-        meta.setLore(Arrays.asList(
-                ChatColor.GRAY + "ПКМ чтобы использовать",
-                ChatColor.GRAY + "Дает эффект напыханости"
-        ));
-        meta.getPersistentDataContainer().set(teaJointKey, PersistentDataType.BOOLEAN, true);
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private String getProgressBar(int percent) {
-        int bars = percent / 10;
-        StringBuilder bar = new StringBuilder();
-        bar.append(ChatColor.GREEN);
-        for (int i = 0; i < bars; i++) bar.append("|");
-        bar.append(ChatColor.GRAY);
-        for (int i = bars; i < 10; i++) bar.append("|");
-        return bar.toString();
-    }
-
-    // ==================== СИСТЕМА РОСТА КУСТОВ ====================
-
-    @EventHandler
-    public void onBlockPlace(BlockPlaceEvent event) {
-        ItemStack item = event.getItemInHand();
-        if (!item.hasItemMeta()) return;
-
-        PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-        if (pdc.has(teaBushKey, PersistentDataType.BOOLEAN)) {
-            Block block = event.getBlock();
-            Location loc = block.getLocation();
-
-            TeaBushData bushData = new TeaBushData(loc, System.currentTimeMillis(), false);
-            teaBushes.put(loc, bushData);
-            saveTeaBush(bushData);
-        }
-    }
-
-    @EventHandler
-    public void onBlockBreak(BlockBreakEvent event) {
-        Block block = event.getBlock();
-        if (block.getType() == Material.FERN) {
-            TeaBushData bushData = teaBushes.remove(block.getLocation());
-            if (bushData != null) {
-                removeParticles(block.getLocation());
-                deleteTeaBush(bushData);
-
-                // Выпадает только блок
-                event.setDropItems(false);
-                block.getWorld().dropItemNaturally(block.getLocation(), createTeaBushItem());
-            }
-        }
-    }
-
-    @EventHandler
-    public void onPlayerInteract(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (event.getHand() != EquipmentSlot.HAND) return;
-
-        Block block = event.getClickedBlock();
-        if (block == null || block.getType() != Material.FERN) return;
-
-        Player player = event.getPlayer();
-        ItemStack tool = player.getInventory().getItemInMainHand();
-
-        TeaBushData bushData = teaBushes.get(block.getLocation());
-        if (bushData == null) return;
-
-        // Сбор ножницами
-        if (tool.getType() == Material.SHEARS && bushData.isMature()) {
-            event.setCancelled(true);
-
-            // Выпадение плодов
-            Random random = new Random();
-            int fruitsAmount = random.nextInt(3) + 1; // 1-3 плода
-            block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
-            if (fruitsAmount > 1) {
-                block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
-            }
-            if (fruitsAmount > 2) {
-                block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
-            }
-
-            // 30% шанс на выпадение саженца
-            if (random.nextInt(100) < 30) {
-                block.getWorld().dropItemNaturally(block.getLocation(), createTeaBushItem());
-            }
-
-            // Сброс куста
-            removeParticles(block.getLocation());
-            bushData.setMature(false);
-            bushData.setPlantTime(System.currentTimeMillis());
-            saveTeaBush(bushData);
-        }
-    }
-
-    private void startBushGrowthTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                long currentTime = System.currentTimeMillis();
-
-                for (TeaBushData bushData : teaBushes.values()) {
-                    if (bushData.isMature()) continue;
-
-                    long elapsed = (currentTime - bushData.getPlantTime()) / 1000;
-                    if (elapsed >= GROW_TIME && !bushData.isMature()) {
-                        bushData.setMature(true);
-                        spawnParticles(bushData.getLocation());
-                        saveTeaBush(bushData);
-                    }
-                }
-            }
-        }.runTaskTimer(this, 20L, 20L); // Каждую секунду
-    }
-
-    public void spawnParticles(Location location) {
-        if (location.getWorld() == null) return;
-
-        Location center = location.clone().add(0.5, 1.0, 0.5);
-
-        // Основные частицы - END_ROD (мерцающие)
-        location.getWorld().spawnParticle(
-                Particle.END_ROD,
-                center,
-                8, // Уменьшено для оптимизации
-                0.2, 0.2, 0.2,
-                0.02
-        );
-
-        // Случайные зеленые частицы для лучшей видимости
-        if (ThreadLocalRandom.current().nextInt(4) == 0) { // 25% шанс
-            location.getWorld().spawnParticle(
-                    Particle.HAPPY_VILLAGER,
-                    center,
-                    4,
-                    0.2, 0.3, 0.2,
-                    0.1
-            );
-        }
-    }
-
-    public void removeParticles(Location location) {
-        // Частицы исчезают сами, ничего делать не нужно
-    }
-
-    // ==================== СИСТЕМА СУШКИ ====================
-
-    private void startItemFrameCheckTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    for (org.bukkit.entity.Entity entity : player.getNearbyEntities(50, 50, 50)) {
-                        if (entity instanceof ItemFrame frame) {
-                            ItemStack item = frame.getItem();
-                            if (item.getType() == Material.SHORT_GRASS && item.hasItemMeta()) {
-                                ItemMeta meta = item.getItemMeta();
-                                PersistentDataContainer pdc = meta.getPersistentDataContainer();
-
-                                if (pdc.has(teaFruitKey, PersistentDataType.BOOLEAN)) {
-                                    int dryness = pdc.getOrDefault(drynessKey, PersistentDataType.INTEGER, 0);
-                                    dryness = Math.min(100, dryness + 2); // +2% за 5 секунд = 100% за 250 секунд (4+ мин)
-
-                                    if (dryness >= 100) {
-                                        // Становится сухим чаем
-                                        frame.setItem(createDryTeaItem());
-                                    } else {
-                                        // Обновляем процент сушки
-                                        frame.setItem(createTeaFruitItem(dryness));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }.runTaskTimer(this, 20L, 100L); // Каждые 5 секунд
-    }
-
-    // ==================== СИСТЕМА НАПЫХАНОСТИ ====================
-
-    @EventHandler
-    public void onJointUse(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_AIR &&
-                event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-
-        Player player = event.getPlayer();
-        ItemStack item = player.getInventory().getItemInMainHand();
-
-        if (item.getType() == Material.FIREWORK_ROCKET && item.hasItemMeta()) {
-            PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-            if (pdc.has(teaJointKey, PersistentDataType.BOOLEAN)) {
-                event.setCancelled(true);
-
-                // Тратим предмет
-                item.setAmount(item.getAmount() - 1);
-
-                // Частицы дыма
-                Location eyeLoc = player.getEyeLocation();
-                player.getWorld().spawnParticle(Particle.CAMPFIRE_COSY_SMOKE,
-                        eyeLoc, 30, 0.2, 0.2, 0.2, 0.05);
-
-                // Добавляем напыханость
-                UUID uuid = player.getUniqueId();
-                int currentLevel = buzzLevels.getOrDefault(uuid, 0);
-                buzzLevels.put(uuid, Math.min(100, currentLevel + BUZZ_INCREMENT));
-
-                player.sendMessage(ChatColor.DARK_GREEN + "☁ " + ChatColor.GREEN +
-                        "Напыханость: " + getBuzzBar(buzzLevels.get(uuid)));
-            }
-        }
-    }
-
-    @EventHandler
-    public void onWaterDrink(PlayerItemConsumeEvent event) {
-        ItemStack item = event.getItem();
-        if (item.getType() == Material.GLASS_BOTTLE &&
-                event.getPlayer().getTargetBlockExact(1).getType() == Material.WATER) {
-
-            Player player = event.getPlayer();
-            UUID uuid = player.getUniqueId();
-            int currentLevel = buzzLevels.getOrDefault(uuid, 0);
-
-            if (currentLevel > 0) {
-                buzzLevels.put(uuid, Math.max(0, currentLevel - WATER_REDUCTION));
-                player.sendMessage(ChatColor.AQUA + "💧 " + ChatColor.WHITE +
-                        "Вода снизила напыханость. Текущий уровень: " +
-                        getBuzzBar(buzzLevels.get(uuid)));
-            }
-        }
-    }
-
-    private void startBuzzEffectsTask() {
-        buzzTask = new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    UUID uuid = player.getUniqueId();
-                    int level = buzzLevels.getOrDefault(uuid, 0);
-
-                    if (level <= 0) continue;
-
-                    // Естественный спад
-                    buzzLevels.put(uuid, Math.max(0, level - NATURAL_DECAY));
-
-                    // Применяем эффекты
-                    applyBuzzEffects(player, level);
-                }
-            }
-        }.runTaskTimer(this, 0L, DECAY_INTERVAL);
-    }
-    private void startParticleTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                int particleCount = 0;
-
-                for (TeaBushData bushData : teaBushes.values()) {
-                    if (bushData.isMature()) {
-                        Location loc = bushData.getLocation();
-
-                        // Проверяем валидность локации
-                        if (loc.getWorld() == null) continue;
-
-                        // Проверяем, загружен ли чанк
-                        if (!loc.getChunk().isLoaded()) continue;
-
-                        // Проверяем, есть ли игроки в радиусе 32 блоков (для оптимизации)
-                        boolean playersNearby = loc.getWorld().getPlayers().stream()
-                                .anyMatch(player -> player.getLocation().distanceSquared(loc) < 1024); // 32^2
-
-                        if (playersNearby) {
-                            spawnParticles(loc);
-                            particleCount++;
-                        }
-                    }
-                }
-
-                // Логирование для отладки (можно закомментировать)
-                if (particleCount > 0 && getLogger().isLoggable(java.util.logging.Level.FINE)) {
-                    getLogger().fine("Spawned particles for " + particleCount + " mature tea bushes");
-                }
-            }
-        }.runTaskTimer(this, 60L, 30L); // Первый запуск через 3 секунды, затем каждые 1.5 секунды
-    }
-
-    private void startCleanupInvalidBushes() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                int removedCount = 0;
-                Iterator<Map.Entry<Location, TeaBushData>> iterator = teaBushes.entrySet().iterator();
-
-                while (iterator.hasNext()) {
-                    Map.Entry<Location, TeaBushData> entry = iterator.next();
-                    Location loc = entry.getKey();
-
-                    // Проверяем валидность локации и блока
-                    if (loc.getWorld() == null) {
-                        iterator.remove();
-                        deleteTeaBushByLocation(loc);
-                        removedCount++;
-                        continue;
-                    }
-
-                    // Проверяем, существует ли блок и является ли он fern
-                    if (loc.getBlock().getType() != Material.FERN) {
-                        iterator.remove();
-                        deleteTeaBushByLocation(loc);
-                        removedCount++;
-                        continue;
-                    }
-                }
-
-                if (removedCount > 0) {
-                    getLogger().info("Cleaned up " + removedCount + " invalid tea bushes");
-                }
-            }
-        }.runTaskTimer(this, 200L, 6000L); // Через 10 секунд после старта, затем каждые 5 минут
-    }
-
-    private void applyBuzzEffects(Player player, int level) {
-        Random random = new Random();
-
-        // Тошнота (раз в минуту на 5 секунд)
-        if (level > 10 && random.nextInt(100) < 30) {
-            player.addPotionEffect(new PotionEffect(
-                    PotionEffectType.NAUSEA, 100, 0, false, true, true));
-        }
-
-        // Замедление
-        int slownessLevel = Math.min(4, level / 25);
-        if (slownessLevel > 0) {
-            player.addPotionEffect(new PotionEffect(
-                    PotionEffectType.SLOWNESS, 40, slownessLevel - 1, false, true, true));
-        }
-
-        // Ночное зрение при 50%+
-        if (level >= 50) {
-            player.addPotionEffect(new PotionEffect(
-                    PotionEffectType.NIGHT_VISION, 400, 0, false, false, true));
-        }
-
-        // Слепота при 70%+
-        if (level >= 70 && random.nextInt(100) < 20) {
-            player.addPotionEffect(new PotionEffect(
-                    PotionEffectType.BLINDNESS, 20, 0, false, true, true));
-        }
-
-        // Шанс выронить предмет при 90%+
-        if (level >= 90 && random.nextInt(100) < 15) {
-            PlayerInventory inv = player.getInventory();
-            int slot = player.getInventory().getHeldItemSlot();
-            ItemStack item = inv.getItem(slot);
-            if (item != null && item.getType() != Material.AIR) {
-                inv.setItem(slot, null);
-                player.getWorld().dropItemNaturally(player.getLocation(), item);
-                player.sendMessage(ChatColor.RED + "☁ Ваши пальцы ослабли... вы уронили предмет!");
-            }
-        }
-    }
-
-    private String getBuzzBar(int level) {
-        int filled = level / 10;
-        StringBuilder bar = new StringBuilder();
-        bar.append(ChatColor.GREEN);
-        for (int i = 0; i < filled; i++) bar.append("▮");
-        bar.append(ChatColor.GRAY);
-        for (int i = filled; i < 10; i++) bar.append("▯");
-        bar.append(ChatColor.WHITE).append(" ").append(level).append("%");
-        return bar.toString();
-    }
-
-    // ==================== КРАФТ ====================
 
     private void registerRecipes() {
-        // Крафт скруток
-        ShapelessRecipe jointRecipe = new ShapelessRecipe(
-                new NamespacedKey(this, "tea_joint_craft"),
-                createTeaJointItem()
-        );
-        jointRecipe.addIngredient(1, Material.PAPER);
-        jointRecipe.addIngredient(1, Material.DEAD_BUSH);
-
-        // Проверяем NBT через слушатель крафта
-        Bukkit.addRecipe(jointRecipe);
+        new RecipeManager(this).registerRecipes();
     }
 
-    @EventHandler
-    public void onCraft(org.bukkit.event.inventory.CraftItemEvent event) {
-        ItemStack result = event.getCurrentItem();
-        if (result != null && result.getType() == Material.FIREWORK_ROCKET) {
-            // Проверяем, что использован сухой чай с NBT
-            boolean hasDryTea = false;
+    // ==================== Getters ====================
+    public NamespacedKey getTeaBushKey() { return teaBushKey; }
+    public NamespacedKey getTeaFruitKey() { return teaFruitKey; }
+    public NamespacedKey getTeaDryKey() { return teaDryKey; }
+    public NamespacedKey getTeaJointKey() { return teaJointKey; }
+    public NamespacedKey getDrynessKey() { return drynessKey; }
+    public NamespacedKey getPlantTimeKey() { return plantTimeKey; }
+    public Map<Location, TeaBushData> getTeaBushes() { return teaBushes; }
+    public Map<UUID, Integer> getBuzzLevels() { return buzzLevels; }
+    public Map<UUID, Long> getLastEffectTime() { return lastEffectTime; }
+    public Map<UUID, String> getDistortedNames() { return distortedNames; }
+    public Map<UUID, Long> getNameDistortExpiry() { return nameDistortExpiry; }
+    public Map<UUID, Map<Integer, String>> getItemRenames() { return itemRenames; }
+    public Connection getConnection() { return connection; }
+    public void setConnection(Connection connection) { this.connection = connection; }
 
-            for (ItemStack item : event.getInventory().getMatrix()) {
-                if (item != null && item.getType() == Material.DEAD_BUSH && item.hasItemMeta()) {
-                    PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-                    if (pdc.has(teaDryKey, PersistentDataType.BOOLEAN)) {
-                        hasDryTea = true;
-                        break;
-                    }
-                }
-            }
+    // ==================== Методы БД (делегирование) ====================
+    public void initDatabase() { DatabaseManager.initDatabase(this); }
+    public void checkConnection() { DatabaseManager.checkConnection(this); }
+    public void closeDatabase() { DatabaseManager.closeDatabase(this); }
+    public void loadTeaBushes() { DatabaseManager.loadTeaBushes(this); }
+    public void saveTeaBush(TeaBushData bushData) { DatabaseManager.saveTeaBush(this, bushData); }
+    public void saveTeaBushAsync(TeaBushData bushData) { DatabaseManager.saveTeaBushAsync(this, bushData); }
+    public void deleteTeaBush(TeaBushData bushData) { DatabaseManager.deleteTeaBush(this, bushData); }
+    public void deleteTeaBushByLocation(Location loc) { DatabaseManager.deleteTeaBushByLocation(this, loc); }
+    public void deleteTeaBushAsync(TeaBushData bushData) { DatabaseManager.deleteTeaBushAsync(this, bushData); }
+    public void saveAllTeaBushes() { DatabaseManager.saveAllTeaBushes(this); }
+    public void saveAllTeaBushesAsync() { DatabaseManager.saveAllTeaBushesAsync(this); }
 
-            if (hasDryTea) {
-                // Заменяем результат на наши скрутки
-                event.setCurrentItem(createTeaJointItem());
-                event.getCurrentItem().setAmount(2); // 2 скрутки
-            }
-        }
-    }
+    // ==================== Методы предметов (делегирование) ====================
+    public ItemStack createTeaBushItem() { return ItemFactory.createTeaBushItem(this); }
+    public ItemStack createTeaFruitItem(int dryness) { return ItemFactory.createTeaFruitItem(this, dryness); }
+    public ItemStack createDryTeaItem() { return ItemFactory.createDryTeaItem(this); }
+    public ItemStack createTeaJointItem() { return ItemFactory.createTeaJointItem(this); }
 
-// ==================== БАЗА ДАННЫХ ====================
-
-    private void initDatabase() {
-        try {
-            // Создаем директорию плагина, если её нет
-            if (!getDataFolder().exists()) {
-                if (getDataFolder().mkdirs()) {
-                    getLogger().info("Created plugin directory: " + getDataFolder().getAbsolutePath());
-                }
-            }
-
-            // Используем путь внутри папки плагина
-            File dbFile = new File(getDataFolder(), "teabushes.db");
-            connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
-
-            // Включаем FOREIGN KEYS и другие оптимизации
-            try (Statement stmt = connection.createStatement()) {
-                stmt.execute("PRAGMA foreign_keys = ON;");
-                stmt.execute("PRAGMA journal_mode = WAL;");  // Write-Ahead Logging для производительности
-                stmt.execute("PRAGMA synchronous = NORMAL;"); // Баланс скорости и надежности
-            }
-
-            // Создаем таблицу с правильными типами данных
-            try (Statement stmt = connection.createStatement()) {
-                stmt.execute("""
-                CREATE TABLE IF NOT EXISTS tea_bushes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    world VARCHAR(64) NOT NULL,
-                    x INTEGER NOT NULL,
-                    y INTEGER NOT NULL,
-                    z INTEGER NOT NULL,
-                    plant_time BIGINT NOT NULL,
-                    is_mature BOOLEAN NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(world, x, y, z)
-                )
-            """);
-
-                // Создаем индексы для быстрого поиска
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_world_coords ON tea_bushes(world, x, y, z)");
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_is_mature ON tea_bushes(is_mature)");
-            }
-
-            getLogger().info("Database initialized successfully at: " + dbFile.getAbsolutePath());
-
-        } catch (SQLException e) {
-            getLogger().severe("Failed to initialize database: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void checkConnection() {
-        try {
-            if (connection == null || connection.isClosed()) {
-                getLogger().warning("Database connection lost, reconnecting...");
-                initDatabase();
-            }
-        } catch (SQLException e) {
-            getLogger().severe("Failed to check database connection: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void closeDatabase() {
-        try {
-            if (connection != null && !connection.isClosed()) {
-                // Сохраняем все перед закрытием
-                saveAllTeaBushes();
-                connection.close();
-                getLogger().info("Database connection closed");
-            }
-        } catch (SQLException e) {
-            getLogger().severe("Failed to close database connection: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void loadTeaBushes() {
-        checkConnection();
-        teaBushes.clear();
-
-        String sql = "SELECT * FROM tea_bushes";
-
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-
-            int loadedCount = 0;
-            int skippedCount = 0;
-
-            while (rs.next()) {
-                String worldName = rs.getString("world");
-                World world = Bukkit.getWorld(worldName);
-
-                if (world == null) {
-                    skippedCount++;
-                    getLogger().warning("World '" + worldName + "' not found, skipping tea bush");
-                    continue;
-                }
-
-                Location loc = new Location(world,
-                        rs.getInt("x"),
-                        rs.getInt("y"),
-                        rs.getInt("z")
-                );
-
-                // Проверяем, существует ли блок до сих пор
-                if (loc.getBlock().getType() != Material.FERN) {
-                    skippedCount++;
-                    deleteTeaBushByLocation(loc); // Очищаем невалидные записи
-                    continue;
-                }
-
-                TeaBushData bushData = new TeaBushData(
-                        loc,
-                        rs.getLong("plant_time"),
-                        rs.getBoolean("is_mature")
-                );
-
-                teaBushes.put(loc, bushData);
-                loadedCount++;
-
-                // Восстанавливаем частицы для зрелых кустов
-                if (bushData.isMature()) {
-                    spawnParticles(loc);
-                }
-            }
-
-            getLogger().info(String.format("Loaded %d tea bushes, skipped %d invalid entries",
-                    loadedCount, skippedCount));
-
-        } catch (SQLException e) {
-            getLogger().severe("Failed to load tea bushes: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void saveTeaBush(TeaBushData bushData) {
-        if (bushData == null || bushData.getLocation() == null || bushData.getLocation().getWorld() == null) {
-            getLogger().warning("Attempted to save invalid tea bush data");
-            return;
-        }
-
-        checkConnection();
-        Location loc = bushData.getLocation();
-
-        String sql = """
-        INSERT OR REPLACE INTO tea_bushes (world, x, y, z, plant_time, is_mature, updated_at) 
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """;
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, loc.getWorld().getName());
-            pstmt.setInt(2, loc.getBlockX());
-            pstmt.setInt(3, loc.getBlockY());
-            pstmt.setInt(4, loc.getBlockZ());
-            pstmt.setLong(5, bushData.getPlantTime());
-            pstmt.setBoolean(6, bushData.isMature());
-            pstmt.executeUpdate();
-
-        } catch (SQLException e) {
-            getLogger().severe("Failed to save tea bush at " + loc + ": " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void saveTeaBushAsync(TeaBushData bushData) {
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            saveTeaBush(bushData);
-        });
-    }
-
-    private void deleteTeaBush(TeaBushData bushData) {
-        if (bushData == null || bushData.getLocation() == null) return;
-        deleteTeaBushByLocation(bushData.getLocation());
-    }
-
-    private void deleteTeaBushByLocation(Location loc) {
-        if (loc == null || loc.getWorld() == null) return;
-
-        checkConnection();
-        String sql = "DELETE FROM tea_bushes WHERE world = ? AND x = ? AND y = ? AND z = ?";
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, loc.getWorld().getName());
-            pstmt.setInt(2, loc.getBlockX());
-            pstmt.setInt(3, loc.getBlockY());
-            pstmt.setInt(4, loc.getBlockZ());
-            int deleted = pstmt.executeUpdate();
-
-            if (deleted > 0) {
-                getLogger().fine("Deleted tea bush at " + loc);
-            }
-
-        } catch (SQLException e) {
-            getLogger().severe("Failed to delete tea bush at " + loc + ": " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-
-    private void deleteTeaBushAsync(TeaBushData bushData) {
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            deleteTeaBush(bushData);
-        });
-    }
-
-    private void saveAllTeaBushes() {
-        if (teaBushes.isEmpty()) {
-            getLogger().info("No tea bushes to save");
-            return;
-        }
-
-        getLogger().info("Saving " + teaBushes.size() + " tea bushes...");
-        int savedCount = 0;
-
-        for (TeaBushData bushData : teaBushes.values()) {
-            saveTeaBush(bushData);
-            savedCount++;
-        }
-
-        getLogger().info("Saved " + savedCount + " tea bushes");
-    }
-
-    private void saveAllTeaBushesAsync() {
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            saveAllTeaBushes();
-        });
-    }
-
-    private void cleanupInvalidBushes() {
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            int removedCount = 0;
-            Iterator<Map.Entry<Location, TeaBushData>> iterator = teaBushes.entrySet().iterator();
-
-            while (iterator.hasNext()) {
-                Map.Entry<Location, TeaBushData> entry = iterator.next();
-                Location loc = entry.getKey();
-
-                if (loc.getBlock().getType() != Material.FERN) {
-                    iterator.remove();
-                    deleteTeaBushByLocation(loc);
-                    removeParticles(loc);
-                    removedCount++;
-                }
-            }
-
-            if (removedCount > 0) {
-                getLogger().info("Cleaned up " + removedCount + " invalid tea bushes");
-            }
-        }, 200L, 6000L); // Проверка через 10 секунд после старта, затем каждые 5 минут
-    }
+    // ==================== Вспомогательные методы ====================
+    public String getBuzzBar(int level) { return Utils.getBuzzBar(level); }
+    public void spawnParticles(Location location) { Utils.spawnParticles(location); }
+    public void removeParticles(Location location) { Utils.removeParticles(location); }
+    public long getGlobalCooldown(int level) { return Utils.getGlobalCooldown(level); }
+    public String getDefaultItemName(Material material) { return Utils.getDefaultItemName(material); }
 }

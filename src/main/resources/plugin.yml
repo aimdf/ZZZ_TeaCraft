@@ -1,17 +1,20 @@
 name: ZZZ_TeaCraft
-version: '1.0'
+version: 1.1.0
 main: com.zzz.ZZZ_teacraft
-api-version: '1.20'
-description: Tea cultivation and smoking plugin
+api-version: 1.20
+description: Чайный плагин с эффектами напыханости
 author: ZZZ
 
 commands:
   teacraft:
-    description: Admin commands for TeaCraft
-    usage: /<command> <give/bushinfo/setstage>
-    permission: teacraft.admin
+    description: Главная команда плагина TeaCraft
+    usage: /teacraft <subcommand>
+    aliases: [tc, tea]
 
 permissions:
   teacraft.admin:
-    description: Allows use of admin commands
+    description: Права на административные команды
     default: op
+  teacraft.use:
+    description: Права на использование основных функций
+    default: true
