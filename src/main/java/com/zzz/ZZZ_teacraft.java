@@ -6,44 +6,198 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityShootBowEvent;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.ShapelessRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.PotionType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
-import java.util.concurrent.ThreadLocalRandom;
+import org.bukkit.util.Vector;
 
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.Iterator;
 import java.io.File;
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 public final class ZZZ_teacraft extends JavaPlugin implements Listener {
 
-    // Константы
+    // ==================== ОСНОВНЫЕ КОНСТАНТЫ ====================
     private static final int GROW_TIME = 300; // 5 минут в секундах (300 * 20 = 6000 тиков)
     private static final int DRY_TIME = 300; // 5 минут для сушки
     private static final int BUZZ_INCREMENT = 20;
     private static final int WATER_REDUCTION = 30;
     private static final int NATURAL_DECAY = 1;
     private static final long DECAY_INTERVAL = 1200; // 1 минута в тиках
+
+    // ==================== ГЛОБАЛЬНЫЙ КУЛДАУН ЭФФЕКТОВ ====================
+    private static final long GLOBAL_COOLDOWN_LOW = 600; // 30 секунд для уровня <50%
+    private static final long GLOBAL_COOLDOWN_MED = 400; // 20 секунд для уровня 50-80%
+    private static final long GLOBAL_COOLDOWN_HIGH = 200; // 10 секунд для уровня >80%
+
+    // ==================== НАСТРОЙКИ ЭФФЕКТОВ НАПЫХАНОСТИ ====================
+
+    // Темнота (DARKNESS)
+    private static final int DARKNESS_LEVEL_MIN = 61;
+    private static final double DARKNESS_CHANCE_MED = 0.15; // 15% в минуту
+    private static final double DARKNESS_CHANCE_HIGH = 0.30; // 30% в минуту
+    private static final int DARKNESS_DURATION_MED = 60; // 3 секунды (60 тиков)
+    private static final int DARKNESS_DURATION_HIGH = 100; // 5 секунд (100 тиков)
+
+    // Размытость (BLUR - медлительность + слабость)
+    private static final int BLUR_LEVEL_MIN = 31;
+    private static final double BLUR_CHANCE_LOW = 0.10;
+    private static final double BLUR_CHANCE_MED = 0.20;
+    private static final double BLUR_CHANCE_HIGH = 0.30;
+    private static final int BLUR_DURATION_LOW = 60; // 3 сек
+    private static final int BLUR_DURATION_MED = 100; // 5 сек
+    private static final int BLUR_DURATION_HIGH = 160; // 8 сек
+    private static final int BLUR_AMPLIFIER_LOW = 0; // I уровень
+    private static final int BLUR_AMPLIFIER_MED = 1; // II уровень
+    private static final int BLUR_AMPLIFIER_HIGH = 1; // II уровень
+
+    // Паранойя - поворот головы (HEAD_TWITCH)
+    private static final int HEADTWITCH_LEVEL_MIN = 31;
+    private static final double HEADTWITCH_CHANCE_LOW = 0.05;
+    private static final double HEADTWITCH_CHANCE_MED = 0.10;
+    private static final double HEADTWITCH_CHANCE_HIGH = 0.20;
+    private static final int HEADTWITCH_ANGLE_LOW = 90; // макс 90 градусов
+    private static final int HEADTWITCH_ANGLE_MED = 135; // макс 135 градусов
+    private static final int HEADTWITCH_ANGLE_HIGH = 180; // макс 180 градусов
+
+    // Паранойя - промах стрельбой (MISS_SHOT)
+    private static final int MISS_LEVEL_MIN = 31;
+    private static final double MISS_CHANCE_LOW = 0.15; // 15% промах
+    private static final double MISS_CHANCE_MED = 0.30; // 30% промах
+    private static final double MISS_CHANCE_HIGH = 0.50; // 50% промах
+
+    // Искажение сообщений (CHAT_DISTORTION)
+    private static final int CHATDISTORT_LEVEL_MIN = 31;
+    private static final double CHATDISTORT_CHANCE_LOW = 0.40;
+    private static final double CHATDISTORT_CHANCE_MED = 0.60;
+    private static final double CHATDISTORT_CHANCE_HIGH = 0.80;
+    private static final int CHATDISTORT_REPEAT_LOW_MIN = 2;
+    private static final int CHATDISTORT_REPEAT_LOW_MAX = 4;
+    private static final int CHATDISTORT_REPEAT_MED_MIN = 3;
+    private static final int CHATDISTORT_REPEAT_MED_MAX = 5;
+    private static final int CHATDISTORT_REPEAT_HIGH_MIN = 4;
+    private static final int CHATDISTORT_REPEAT_HIGH_MAX = 7;
+
+    // Искажение ника (NAME_DISTORTION)
+    private static final int NAMEDISTORT_LEVEL_MIN = 31;
+    private static final double NAMEDISTORT_CHANCE_LOW = 0.30;
+    private static final double NAMEDISTORT_CHANCE_MED = 0.50;
+    private static final double NAMEDISTORT_CHANCE_HIGH = 0.70;
+    private static final int NAMEDISTORT_CHANGES_LOW = 2; // макс изменений
+    private static final int NAMEDISTORT_CHANGES_MED = 3;
+    private static final int NAMEDISTORT_CHANGES_HIGH = 5;
+
+    // Кошачий язык (CAT_LANGUAGE)
+    private static final int CATLANG_LEVEL_MIN = 31;
+    private static final double CATLANG_CHANCE_LOW = 0.20;
+    private static final double CATLANG_CHANCE_MED = 0.40;
+    private static final double CATLANG_CHANCE_HIGH = 0.60;
+
+    // Случайные прыжки (RANDOM_JUMP)
+    private static final int JUMP_LEVEL_MIN = 31;
+    private static final int JUMP_FREQ_LOW_MIN = 3; // раз в минуту
+    private static final int JUMP_FREQ_LOW_MAX = 6;
+    private static final int JUMP_FREQ_MED_MIN = 8;
+    private static final int JUMP_FREQ_MED_MAX = 12;
+    private static final int JUMP_FREQ_HIGH_MIN = 6;
+    private static final int JUMP_FREQ_HIGH_MAX = 10;
+    private static final float JUMP_POWER_LOW = 0.45f;
+    private static final float JUMP_POWER_MED = 0.48f;
+    private static final float JUMP_POWER_HIGH = 0.55f;
+    // Дрожание камеры (SCREEN_SHAKE)
+    private static final int SHAKE_LEVEL_MIN = 31;
+    private static final int SHAKE_FREQ_LOW_MIN = 3;
+    private static final int SHAKE_FREQ_LOW_MAX = 4;
+    private static final int SHAKE_FREQ_MED_MIN = 5;
+    private static final int SHAKE_FREQ_MED_MAX = 7;
+    private static final int SHAKE_FREQ_HIGH_MIN = 8;
+    private static final int SHAKE_FREQ_HIGH_MAX = 12;
+    private static final int SHAKE_DURATION_LOW = 40; // 2 сек
+    private static final int SHAKE_DURATION_MED = 60; // 3 сек
+    private static final int SHAKE_DURATION_HIGH = 80; // 4 сек
+    private static final float SHAKE_AMPLITUDE_YAW_LOW = 1.0f;   // Амплитуда поворота по горизонтали
+    private static final float SHAKE_AMPLITUDE_YAW_MED = 2.0f;
+    private static final float SHAKE_AMPLITUDE_YAW_HIGH = 3.0f;
+    private static final float SHAKE_AMPLITUDE_PITCH_LOW = 0.50f; // Амплитуда поворота по вертикали
+    private static final float SHAKE_AMPLITUDE_PITCH_MED = 1.0f;
+    private static final float SHAKE_AMPLITUDE_PITCH_HIGH = 1.5f;
+
+    // Искажение скорости (SPEED_WARP)
+    private static final int SPEEDWARP_LEVEL_MIN = 31;
+    private static final int SPEEDWARP_FREQ_LOW_MIN = 2;
+    private static final int SPEEDWARP_FREQ_LOW_MAX = 3;
+    private static final int SPEEDWARP_FREQ_MED_MIN = 4;
+    private static final int SPEEDWARP_FREQ_MED_MAX = 5;
+    private static final int SPEEDWARP_FREQ_HIGH_MIN = 6;
+    private static final int SPEEDWARP_FREQ_HIGH_MAX = 8;
+    private static final int SPEEDWARP_DURATION_LOW = 40; // 2 сек
+    private static final int SPEEDWARP_DURATION_MED = 60; // 3 сек
+    private static final int SPEEDWARP_DURATION_HIGH = 80; // 4 сек
+    private static final int SPEEDWARP_AMPLIFIER_LOW = 0; // I
+    private static final int SPEEDWARP_AMPLIFIER_MED = 1; // II
+    private static final int SPEEDWARP_AMPLIFIER_HIGH = 1; // II
+
+    // Случайные звуки (RANDOM_SOUNDS)
+    private static final int SOUND_LEVEL_MIN = 31;
+    private static final int SOUND_FREQ_LOW_MIN = 1;
+    private static final int SOUND_FREQ_LOW_MAX = 2;
+    private static final int SOUND_FREQ_MED_MIN = 2;
+    private static final int SOUND_FREQ_MED_MAX = 4;
+    private static final int SOUND_FREQ_HIGH_MIN = 4;
+    private static final int SOUND_FREQ_HIGH_MAX = 6;
+    private static final float SOUND_VOLUME_LOW = 0.5f;
+    private static final float SOUND_VOLUME_MED = 0.8f;
+    private static final float SOUND_VOLUME_HIGH = 1.0f;
+    private static final float SOUND_PITCH = 1.0f;
+
+    // Фантомные частицы (PHANTOM_PARTICLES)
+    private static final int PARTICLE_LEVEL_MIN = 31;
+    private static final int PARTICLE_FREQ_LOW = 200; // каждые 10 сек (200 тиков)
+    private static final int PARTICLE_FREQ_MED = 100; // каждые 5 сек
+    private static final int PARTICLE_FREQ_HIGH = 60; // каждые 3 сек
+    private static final int PARTICLE_COUNT_LOW = 8;
+    private static final int PARTICLE_COUNT_MED = 12;
+    private static final int PARTICLE_COUNT_HIGH = 20;
+
+    // Искажение предметов (ITEM_RENAME)
+    private static final int ITEMRENAME_LEVEL_MIN = 31;
+    private static final double ITEMRENAME_CHANCE_LOW = 0.30;
+    private static final double ITEMRENAME_CHANCE_MED = 0.50;
+    private static final double ITEMRENAME_CHANCE_HIGH = 0.70;
+    private static final int ITEMRENAME_COUNT_LOW = 2;
+    private static final int ITEMRENAME_COUNT_MED = 4;
+    private static final int ITEMRENAME_COUNT_HIGH = 7;
 
     // NamespacedKeys для NBT
     private NamespacedKey teaBushKey;
@@ -59,7 +213,23 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
 
     // Шкала напыханости
     private final Map<UUID, Integer> buzzLevels = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastEffectTime = new ConcurrentHashMap<>(); // Глобальный кулдаун эффектов
+
     private BukkitTask buzzTask;
+    private BukkitTask jumpTask;
+    private BukkitTask shakeTask;
+    private BukkitTask speedWarpTask;
+    private BukkitTask soundTask;
+    private BukkitTask particleTask;
+    private BukkitTask phantomParticleTask;
+    private BukkitTask itemRenameTask;
+
+    // Хранилище для искаженных ников
+    private final Map<UUID, String> distortedNames = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> nameDistortExpiry = new ConcurrentHashMap<>();
+
+    // Хранилище для искаженных предметов
+    private final Map<UUID, Map<Integer, String>> itemRenames = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
@@ -85,6 +255,12 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
         startBuzzEffectsTask();
         startParticleTask();          // Постоянное обновление частиц для зрелых кустов
         startCleanupInvalidBushes(); // Периодическая очистка невалидных кустов
+        startJumpTask();              // Задача для случайных прыжков
+        startShakeTask();             // Задача для дрожания камеры
+        startSpeedWarpTask();         // Задача для искажения скорости
+        startSoundTask();             // Задача для случайных звуков
+        startPhantomParticleTask();   // Задача для фантомных частиц
+        startItemRenameTask();        // Задача для искажения предметов
 
         // Регистрация команд
         Objects.requireNonNull(getCommand("teacraft")).setExecutor(new TeaCraftCommand(this));
@@ -292,6 +468,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
             return true;
         }
     }
+
     @EventHandler
     public void onGrassBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
@@ -357,7 +534,6 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
             return Collections.emptyList();
         }
     }
-
 
     // ==================== МЕТОДЫ СОЗДАНИЯ ПРЕДМЕТОВ ====================
 
@@ -488,11 +664,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
             // Выпадение плодов
             Random random = new Random();
             int fruitsAmount = random.nextInt(3) + 1; // 1-3 плода
-            block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
-            if (fruitsAmount > 1) {
-                block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
-            }
-            if (fruitsAmount > 2) {
+            for (int i = 0; i < fruitsAmount; i++) {
                 block.getWorld().dropItemNaturally(block.getLocation(), createTeaFruitItem(0));
             }
 
@@ -630,18 +802,21 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
     @EventHandler
     public void onWaterDrink(PlayerItemConsumeEvent event) {
         ItemStack item = event.getItem();
-        if (item.getType() == Material.GLASS_BOTTLE &&
-                event.getPlayer().getTargetBlockExact(1).getType() == Material.WATER) {
 
-            Player player = event.getPlayer();
-            UUID uuid = player.getUniqueId();
-            int currentLevel = buzzLevels.getOrDefault(uuid, 0);
+        // Проверяем, что это бутылка с водой (PotionType.WATER)
+        if (item.getType() == Material.POTION) {
+            PotionMeta meta = (PotionMeta) item.getItemMeta();
+            if (meta != null && meta.getBasePotionType() == PotionType.WATER) {
+                Player player = event.getPlayer();
+                UUID uuid = player.getUniqueId();
+                int currentLevel = buzzLevels.getOrDefault(uuid, 0);
 
-            if (currentLevel > 0) {
-                buzzLevels.put(uuid, Math.max(0, currentLevel - WATER_REDUCTION));
-                player.sendMessage(ChatColor.AQUA + "💧 " + ChatColor.WHITE +
-                        "Вода снизила напыханость. Текущий уровень: " +
-                        getBuzzBar(buzzLevels.get(uuid)));
+                if (currentLevel > 0) {
+                    buzzLevels.put(uuid, Math.max(0, currentLevel - WATER_REDUCTION));
+                    player.sendMessage(ChatColor.AQUA + "💧 " + ChatColor.WHITE +
+                            "Вода снизила напыханость. Текущий уровень: " +
+                            getBuzzBar(buzzLevels.get(uuid)));
+                }
             }
         }
     }
@@ -665,6 +840,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
             }
         }.runTaskTimer(this, 0L, DECAY_INTERVAL);
     }
+
     private void startParticleTask() {
         new BukkitRunnable() {
             @Override
@@ -744,7 +920,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
                     PotionEffectType.NAUSEA, 100, 0, false, true, true));
         }
 
-        // Замедление
+        // Замедление (старый эффект, оставляем для обратной совместимости)
         int slownessLevel = Math.min(4, level / 25);
         if (slownessLevel > 0) {
             player.addPotionEffect(new PotionEffect(
@@ -757,13 +933,46 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
                     PotionEffectType.NIGHT_VISION, 400, 0, false, false, true));
         }
 
-        // Слепота при 70%+
-        if (level >= 70 && random.nextInt(100) < 20) {
-            player.addPotionEffect(new PotionEffect(
-                    PotionEffectType.BLINDNESS, 20, 0, false, true, true));
+        // НОВЫЕ ЭФФЕКТЫ:
+
+        // 1. Темнота
+        if (level >= DARKNESS_LEVEL_MIN) {
+            double chance = level >= 81 ? DARKNESS_CHANCE_HIGH : DARKNESS_CHANCE_MED;
+            int duration = level >= 81 ? DARKNESS_DURATION_HIGH : DARKNESS_DURATION_MED;
+
+            if (random.nextDouble() < chance) {
+                player.addPotionEffect(new PotionEffect(
+                        PotionEffectType.DARKNESS, duration, 0, false, true, true));
+            }
         }
 
-        // Шанс выронить предмет при 90%+
+        // 2. Размытость (медлительность + слабость)
+        if (level >= BLUR_LEVEL_MIN) {
+            double chance;
+            int duration;
+            int amplifier;
+
+            if (level >= 81) {
+                chance = BLUR_CHANCE_HIGH;
+                duration = BLUR_DURATION_HIGH;
+                amplifier = BLUR_AMPLIFIER_HIGH;
+            } else if (level >= 61) {
+                chance = BLUR_CHANCE_MED;
+                duration = BLUR_DURATION_MED;
+                amplifier = BLUR_AMPLIFIER_MED;
+            } else {
+                chance = BLUR_CHANCE_LOW;
+                duration = BLUR_DURATION_LOW;
+                amplifier = BLUR_AMPLIFIER_LOW;
+            }
+
+            if (random.nextDouble() < chance) {
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, duration, amplifier, false, true, true));
+                player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, duration, amplifier, false, true, true));
+            }
+        }
+
+        // 3. Шанс выронить предмет при 90%+ (оставляем как есть)
         if (level >= 90 && random.nextInt(100) < 15) {
             PlayerInventory inv = player.getInventory();
             int slot = player.getInventory().getHeldItemSlot();
@@ -776,15 +985,671 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
         }
     }
 
-    private String getBuzzBar(int level) {
-        int filled = level / 10;
-        StringBuilder bar = new StringBuilder();
-        bar.append(ChatColor.GREEN);
-        for (int i = 0; i < filled; i++) bar.append("▮");
-        bar.append(ChatColor.GRAY);
-        for (int i = filled; i < 10; i++) bar.append("▯");
-        bar.append(ChatColor.WHITE).append(" ").append(level).append("%");
-        return bar.toString();
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+
+    private long getGlobalCooldown(int level) {
+        if (level >= 80) {
+            return GLOBAL_COOLDOWN_HIGH;
+        } else if (level >= 50) {
+            return GLOBAL_COOLDOWN_MED;
+        } else {
+            return GLOBAL_COOLDOWN_LOW;
+        }
+    }
+
+    // ==================== НОВЫЕ ЭФФЕКТЫ - ЗАДАЧИ ====================
+
+    private void startJumpTask() {
+        jumpTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final Map<UUID, Long> lastJumpTime = new HashMap<>();
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+                    if (level < JUMP_LEVEL_MIN) continue;
+
+                    // Проверка глобального кулдауна
+                    long now = System.currentTimeMillis();
+                    long lastEffect = lastEffectTime.getOrDefault(uuid, 0L);
+                    long cooldown = getGlobalCooldown(level);
+
+                    if (now - lastEffect < cooldown) continue;
+
+                    // Проверяем, не прыгали ли мы слишком недавно
+                    long lastJump = lastJumpTime.getOrDefault(uuid, 0L);
+                    if (now - lastJump < 1000) continue; // Не чаще раза в секунду
+
+                    // Определяем частоту прыжков в минуту
+                    int frequency;
+                    float jumpPower;
+
+                    if (level >= 81) {
+                        frequency = random.nextInt(JUMP_FREQ_HIGH_MAX - JUMP_FREQ_HIGH_MIN + 1) + JUMP_FREQ_HIGH_MIN;
+                        jumpPower = JUMP_POWER_HIGH;
+                    } else if (level >= 61) {
+                        frequency = random.nextInt(JUMP_FREQ_MED_MAX - JUMP_FREQ_MED_MIN + 1) + JUMP_FREQ_MED_MIN;
+                        jumpPower = JUMP_POWER_MED;
+                    } else {
+                        frequency = random.nextInt(JUMP_FREQ_LOW_MAX - JUMP_FREQ_LOW_MIN + 1) + JUMP_FREQ_LOW_MIN;
+                        jumpPower = JUMP_POWER_LOW;
+                    }
+
+                    // Частота в минуту -> шанс за тик (20 тиков в секунду, 1200 тиков в минуту)
+                    double chancePerTick = frequency / 1200.0;
+
+                    if (random.nextDouble() < chancePerTick) {
+                        // Проверяем, на земле ли игрок
+                        if (player.isOnGround()) {
+                            // Устанавливаем скорость прыжка
+                            Vector velocity = player.getVelocity();
+                            velocity.setY(jumpPower);
+                            player.setVelocity(velocity);
+
+                            lastJumpTime.put(uuid, now);
+                            lastEffectTime.put(uuid, now);
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 1L); // Каждый тик
+    }
+
+    private void startShakeTask() {
+        shakeTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final Map<UUID, Integer> shakeTicks = new HashMap<>();
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+
+                    // Проверка глобального кулдауна
+                    long now = System.currentTimeMillis();
+                    long lastEffect = lastEffectTime.getOrDefault(uuid, 0L);
+                    long cooldown = getGlobalCooldown(level);
+
+                    if (now - lastEffect < cooldown) continue;
+
+                    if (level >= SHAKE_LEVEL_MIN) {
+                        // НЕ трясем, если игрок в воздухе
+                        if (!player.isOnGround()) continue;
+
+                        // Определяем частоту дрожания
+                        int frequency;
+                        int duration;
+                        float yawAmplitude;
+                        float pitchAmplitude;
+
+                        if (level >= 81) {
+                            frequency = random.nextInt(SHAKE_FREQ_HIGH_MAX - SHAKE_FREQ_HIGH_MIN + 1) + SHAKE_FREQ_HIGH_MIN;
+                            duration = SHAKE_DURATION_HIGH;
+                            yawAmplitude = SHAKE_AMPLITUDE_YAW_HIGH;
+                            pitchAmplitude = SHAKE_AMPLITUDE_PITCH_HIGH;
+                        } else if (level >= 61) {
+                            frequency = random.nextInt(SHAKE_FREQ_MED_MAX - SHAKE_FREQ_MED_MIN + 1) + SHAKE_FREQ_MED_MIN;
+                            duration = SHAKE_DURATION_MED;
+                            yawAmplitude = SHAKE_AMPLITUDE_YAW_MED;
+                            pitchAmplitude = SHAKE_AMPLITUDE_PITCH_MED;
+                        } else {
+                            frequency = random.nextInt(SHAKE_FREQ_LOW_MAX - SHAKE_FREQ_LOW_MIN + 1) + SHAKE_FREQ_LOW_MIN;
+                            duration = SHAKE_DURATION_LOW;
+                            yawAmplitude = SHAKE_AMPLITUDE_YAW_LOW;
+                            pitchAmplitude = SHAKE_AMPLITUDE_PITCH_LOW;
+                        }
+
+                        // Если уже трясется, уменьшаем счетчик
+                        if (shakeTicks.containsKey(uuid)) {
+                            int ticksLeft = shakeTicks.get(uuid) - 1;
+                            if (ticksLeft <= 0) {
+                                shakeTicks.remove(uuid);
+                            } else {
+                                shakeTicks.put(uuid, ticksLeft);
+
+                                // Меняем направление взгляда БЕЗ телепортации
+                                Location loc = player.getLocation();
+
+                                float newYaw = loc.getYaw() + (random.nextFloat() - 0.5f) * yawAmplitude;
+                                float newPitch = loc.getPitch() + (random.nextFloat() - 0.5f) * pitchAmplitude;
+                                newPitch = Math.max(-90, Math.min(90, newPitch));
+
+                                // Устанавливаем новое направление без телепортации
+                                player.setRotation(newYaw, newPitch);
+                            }
+                        } else {
+                            // Проверяем, нужно ли начать тряску
+                            double chancePerTick = frequency / 1200.0;
+                            if (random.nextDouble() < chancePerTick) {
+                                shakeTicks.put(uuid, duration);
+                                lastEffectTime.put(uuid, now);
+                            }
+                        }
+                    } else {
+                        shakeTicks.remove(uuid);
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 1L); // Каждый тик
+    }
+    private void startSpeedWarpTask() {
+        speedWarpTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final Map<UUID, Integer> warpTicks = new HashMap<>();
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+
+                    // Проверка глобального кулдауна
+                    long now = System.currentTimeMillis();
+                    long lastEffect = lastEffectTime.getOrDefault(uuid, 0L);
+                    long cooldown = getGlobalCooldown(level);
+
+                    if (now - lastEffect < cooldown) continue;
+
+                    if (level >= SPEEDWARP_LEVEL_MIN) {
+                        // Определяем частоту искажений
+                        int frequency;
+                        int duration;
+                        int amplifier;
+
+                        if (level >= 81) {
+                            frequency = random.nextInt(SPEEDWARP_FREQ_HIGH_MAX - SPEEDWARP_FREQ_HIGH_MIN + 1) + SPEEDWARP_FREQ_HIGH_MIN;
+                            duration = SPEEDWARP_DURATION_HIGH;
+                            amplifier = SPEEDWARP_AMPLIFIER_HIGH;
+                        } else if (level >= 61) {
+                            frequency = random.nextInt(SPEEDWARP_FREQ_MED_MAX - SPEEDWARP_FREQ_MED_MIN + 1) + SPEEDWARP_FREQ_MED_MIN;
+                            duration = SPEEDWARP_DURATION_MED;
+                            amplifier = SPEEDWARP_AMPLIFIER_MED;
+                        } else {
+                            frequency = random.nextInt(SPEEDWARP_FREQ_LOW_MAX - SPEEDWARP_FREQ_LOW_MIN + 1) + SPEEDWARP_FREQ_LOW_MIN;
+                            duration = SPEEDWARP_DURATION_LOW;
+                            amplifier = SPEEDWARP_AMPLIFIER_LOW;
+                        }
+
+                        // Проверяем, активно ли искажение
+                        if (warpTicks.containsKey(uuid)) {
+                            int ticksLeft = warpTicks.get(uuid) - 1;
+                            if (ticksLeft <= 0) {
+                                warpTicks.remove(uuid);
+                                // Снимаем эффекты
+                                player.removePotionEffect(PotionEffectType.SPEED);
+                                player.removePotionEffect(PotionEffectType.SLOWNESS);
+                            } else {
+                                warpTicks.put(uuid, ticksLeft);
+                            }
+                        } else {
+                            // Проверяем, нужно ли начать искажение
+                            double chancePerTick = frequency / 1200.0;
+                            if (random.nextDouble() < chancePerTick) {
+                                warpTicks.put(uuid, duration);
+                                lastEffectTime.put(uuid, now);
+
+                                // Случайно выбираем ускорение или замедление
+                                if (random.nextBoolean()) {
+                                    player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, duration, amplifier, false, true, true));
+                                } else {
+                                    player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, duration, amplifier, false, true, true));
+                                }
+                            }
+                        }
+                    } else {
+                        warpTicks.remove(uuid);
+                        player.removePotionEffect(PotionEffectType.SPEED);
+                        player.removePotionEffect(PotionEffectType.SLOWNESS);
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 1L); // Каждый тик
+    }
+
+    private void startSoundTask() {
+        soundTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final Sound[] sounds = {
+                    Sound.ENTITY_CREEPER_PRIMED,
+                    Sound.ENTITY_ARROW_SHOOT,
+                    Sound.ENTITY_ZOMBIE_AMBIENT,
+                    Sound.ENTITY_SKELETON_AMBIENT,
+                    Sound.ENTITY_SPIDER_AMBIENT,
+                    Sound.ENTITY_GHAST_SCREAM,
+                    Sound.ENTITY_WITHER_AMBIENT,
+                    Sound.ENTITY_ENDERMAN_SCREAM,
+                    Sound.ENTITY_LIGHTNING_BOLT_THUNDER,
+                    Sound.BLOCK_ANVIL_LAND,
+                    Sound.BLOCK_CHEST_OPEN,
+                    Sound.BLOCK_CHERRY_WOOD_DOOR_CLOSE,
+                    Sound.BLOCK_PORTAL_AMBIENT,
+                    Sound.ENTITY_TNT_PRIMED,
+                    Sound.ENTITY_BLAZE_SHOOT
+            };
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+                    if (level < SOUND_LEVEL_MIN) continue;
+
+                    // Проверка глобального кулдауна
+                    long now = System.currentTimeMillis();
+                    long lastEffect = lastEffectTime.getOrDefault(uuid, 0L);
+                    long cooldown = getGlobalCooldown(level);
+
+                    if (now - lastEffect < cooldown) continue;
+
+                    // Определяем частоту звуков
+                    int frequency;
+                    float volume;
+
+                    if (level >= 81) {
+                        frequency = random.nextInt(SOUND_FREQ_HIGH_MAX - SOUND_FREQ_HIGH_MIN + 1) + SOUND_FREQ_HIGH_MIN;
+                        volume = SOUND_VOLUME_HIGH;
+                    } else if (level >= 61) {
+                        frequency = random.nextInt(SOUND_FREQ_MED_MAX - SOUND_FREQ_MED_MIN + 1) + SOUND_FREQ_MED_MIN;
+                        volume = SOUND_VOLUME_MED;
+                    } else {
+                        frequency = random.nextInt(SOUND_FREQ_LOW_MAX - SOUND_FREQ_LOW_MIN + 1) + SOUND_FREQ_LOW_MIN;
+                        volume = SOUND_VOLUME_LOW;
+                    }
+
+                    // Частота в минуту -> шанс за тик
+                    double chancePerTick = frequency / 1200.0;
+
+                    if (random.nextDouble() < chancePerTick) {
+                        Sound sound = sounds[random.nextInt(sounds.length)];
+                        player.playSound(player.getLocation(), sound, volume, SOUND_PITCH);
+                        lastEffectTime.put(uuid, now);
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 1L); // Каждый тик
+    }
+
+    private void startPhantomParticleTask() {
+        phantomParticleTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final Particle[] friendlyParticles = {
+                    Particle.HAPPY_VILLAGER, Particle.HEART, Particle.NOTE
+            };
+            private final Particle[] neutralParticles = {
+                    Particle.SPLASH, Particle.TOTEM_OF_UNDYING, Particle.FIREWORK
+            };
+            private final Particle[] scaryParticles = {
+                    Particle.SMOKE, Particle.PORTAL, Particle.ANGRY_VILLAGER,
+                    Particle.SOUL_FIRE_FLAME, Particle.WITCH
+            };
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+                    if (level < PARTICLE_LEVEL_MIN) continue;
+
+                    // Для частиц НЕ используем глобальный кулдаун, только свою частоту
+
+                    // Определяем частоту и тип частиц
+                    int frequency;
+                    int count;
+                    Particle[] particleSet;
+
+                    if (level >= 81) {
+                        frequency = PARTICLE_FREQ_HIGH;
+                        count = PARTICLE_COUNT_HIGH;
+                        particleSet = scaryParticles;
+                    } else if (level >= 61) {
+                        frequency = PARTICLE_FREQ_MED;
+                        count = PARTICLE_COUNT_MED;
+                        particleSet = neutralParticles;
+                    } else {
+                        frequency = PARTICLE_FREQ_LOW;
+                        count = PARTICLE_COUNT_LOW;
+                        particleSet = friendlyParticles;
+                    }
+
+                    double chancePerTick = 1.0 / frequency;
+
+                    if (random.nextDouble() < chancePerTick) {
+                        Particle particle = particleSet[random.nextInt(particleSet.length)];
+                        Location loc = player.getLocation().add(
+                                random.nextDouble() * 4 - 2,
+                                random.nextDouble() * 3,
+                                random.nextDouble() * 4 - 2
+                        );
+                        player.getWorld().spawnParticle(particle, loc, count, 0.2, 0.2, 0.2, 0.02);
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 1L); // Каждый тик
+    }
+
+    private void startItemRenameTask() {
+        itemRenameTask = new BukkitRunnable() {
+            private final Random random = new Random();
+            private final String[] funnyNames = {
+                    "Загадочная штука", "Непонятный предмет", "Глючный объект",
+                    "Странная вещь", "Сомнительное нечто", "Подозрительный кусок",
+                    "Магический артефакт", "Древняя реликвия", "Космический мусор",
+                    "Сломанный предмет", "Чей-то мусор", "Блестяшка",
+                    "Вкусняшка", "Нямка", "Хрустяшка",
+                    "Тыгыдык", "Бдыщь", "Бабах",
+                    "Секретный ингредиент", "Зельеварение", "Алкаголик"
+            };
+
+            @Override
+            public void run() {
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    UUID uuid = player.getUniqueId();
+                    int level = buzzLevels.getOrDefault(uuid, 0);
+
+                    // Проверка глобального кулдауна
+                    long now = System.currentTimeMillis();
+                    long lastEffect = lastEffectTime.getOrDefault(uuid, 0L);
+                    long cooldown = getGlobalCooldown(level);
+
+                    if (now - lastEffect < cooldown) continue;
+
+                    if (level >= ITEMRENAME_LEVEL_MIN) {
+                        // Определяем шанс и количество предметов
+                        double chance;
+                        int maxCount;
+
+                        if (level >= 81) {
+                            chance = ITEMRENAME_CHANCE_HIGH;
+                            maxCount = ITEMRENAME_COUNT_HIGH;
+                        } else if (level >= 61) {
+                            chance = ITEMRENAME_CHANCE_MED;
+                            maxCount = ITEMRENAME_COUNT_MED;
+                        } else {
+                            chance = ITEMRENAME_CHANCE_LOW;
+                            maxCount = ITEMRENAME_COUNT_LOW;
+                        }
+
+                        // Проверяем каждый предмет в инвентаре
+                        Map<Integer, String> renames = new HashMap<>();
+                        ItemStack[] contents = player.getInventory().getContents();
+
+                        for (int i = 0; i < contents.length; i++) {
+                            ItemStack item = contents[i];
+                            if (item != null && item.getType() != Material.AIR && random.nextDouble() < chance / maxCount) {
+                                String funnyName = funnyNames[random.nextInt(funnyNames.length)];
+                                renames.put(i, funnyName);
+                            }
+                        }
+
+                        if (!renames.isEmpty()) {
+                            itemRenames.put(uuid, renames);
+                            lastEffectTime.put(uuid, now);
+                        }
+                    } else {
+                        itemRenames.remove(uuid);
+                    }
+                }
+            }
+        }.runTaskTimer(this, 20L, 200L); // Каждые 10 секунд
+    }
+
+    private String getDefaultItemName(Material material) {
+        String name = material.toString().toLowerCase();
+        name = name.replace('_', ' ');
+        return name.substring(0, 1).toUpperCase() + name.substring(1);
+    }
+
+    // ==================== ЧАТ ЭФФЕКТЫ ====================
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPlayerChat(AsyncPlayerChatEvent event) {
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+        int level = buzzLevels.getOrDefault(uuid, 0);
+
+        if (level < CHATDISTORT_LEVEL_MIN && level < CATLANG_LEVEL_MIN && level < NAMEDISTORT_LEVEL_MIN) {
+            return;
+        }
+
+        String message = event.getMessage();
+        String originalFormat = event.getFormat();
+        String playerName = player.getDisplayName();
+        Random random = new Random();
+
+        // 1. Искажение сообщения (растягивание гласных)
+        if (level >= CHATDISTORT_LEVEL_MIN) {
+            double chance;
+            int minRepeat, maxRepeat;
+
+            if (level >= 81) {
+                chance = CHATDISTORT_CHANCE_HIGH;
+                minRepeat = CHATDISTORT_REPEAT_HIGH_MIN;
+                maxRepeat = CHATDISTORT_REPEAT_HIGH_MAX;
+            } else if (level >= 61) {
+                chance = CHATDISTORT_CHANCE_MED;
+                minRepeat = CHATDISTORT_REPEAT_MED_MIN;
+                maxRepeat = CHATDISTORT_REPEAT_MED_MAX;
+            } else {
+                chance = CHATDISTORT_CHANCE_LOW;
+                minRepeat = CHATDISTORT_REPEAT_LOW_MIN;
+                maxRepeat = CHATDISTORT_REPEAT_LOW_MAX;
+            }
+
+            if (random.nextDouble() < chance) {
+                message = distortMessage(message, minRepeat, maxRepeat);
+            }
+        }
+
+        // 2. Кошачий язык
+        if (level >= CATLANG_LEVEL_MIN) {
+            double chance;
+            if (level >= 81) {
+                chance = CATLANG_CHANCE_HIGH;
+            } else if (level >= 61) {
+                chance = CATLANG_CHANCE_MED;
+            } else {
+                chance = CATLANG_CHANCE_LOW;
+            }
+
+            if (random.nextDouble() < chance) {
+                message = addCatLanguage(message, level);
+            }
+        }
+
+        // 3. Искажение ника
+        if (level >= NAMEDISTORT_LEVEL_MIN) {
+            double chance;
+            int maxChanges;
+
+            if (level >= 81) {
+                chance = NAMEDISTORT_CHANCE_HIGH;
+                maxChanges = NAMEDISTORT_CHANGES_HIGH;
+            } else if (level >= 61) {
+                chance = NAMEDISTORT_CHANCE_MED;
+                maxChanges = NAMEDISTORT_CHANGES_MED;
+            } else {
+                chance = NAMEDISTORT_CHANCE_LOW;
+                maxChanges = NAMEDISTORT_CHANGES_LOW;
+            }
+
+            if (random.nextDouble() < chance) {
+                String distortedName = distortName(playerName, maxChanges);
+                // Обновляем формат с искаженным ником
+                originalFormat = originalFormat.replace(playerName, distortedName);
+                // Сохраняем для других эффектов (над головой)
+                distortedNames.put(uuid, distortedName);
+                nameDistortExpiry.put(uuid, System.currentTimeMillis() + 60000); // 1 минута
+            }
+        }
+
+        event.setMessage(message);
+        event.setFormat(originalFormat);
+    }
+
+    private String distortMessage(String message, int minRepeat, int maxRepeat) {
+        Random random = new Random();
+        StringBuilder sb = new StringBuilder();
+        Pattern vowelPattern = Pattern.compile("[аеёиоуыэюяaeiou]");
+
+        for (char c : message.toCharArray()) {
+            sb.append(c);
+            String s = String.valueOf(c);
+            if (vowelPattern.matcher(s).matches() && random.nextInt(3) == 0) { // 33% шанс на растяжение
+                int repeat = random.nextInt(maxRepeat - minRepeat + 1) + minRepeat;
+                sb.append("-".repeat(repeat / 2));
+                sb.append(String.valueOf(c).repeat(repeat));
+            }
+        }
+
+        return sb.toString();
+    }
+
+    private String addCatLanguage(String message, int level) {
+        Random random = new Random();
+        String[] catWords = {" мяу", " мяу!", " мяу...", " мяу?", " няв", " мррр"};
+
+        if (level >= 81) {
+            // Вставляем в середину или несколько раз
+            String[] words = message.split(" ");
+            if (words.length > 2) {
+                int pos = random.nextInt(words.length - 1) + 1;
+                words[pos] = words[pos] + catWords[random.nextInt(catWords.length)];
+                return String.join(" ", words);
+            }
+        } else if (level >= 61) {
+            // Заменяем знаки препинания
+            if (message.endsWith(".") || message.endsWith("!") || message.endsWith("?")) {
+                return message.substring(0, message.length() - 1) + catWords[random.nextInt(catWords.length)];
+            }
+        }
+
+        // Просто добавляем в конец
+        return message + catWords[random.nextInt(catWords.length)];
+    }
+
+    private String distortName(String name, int maxChanges) {
+        Random random = new Random();
+        StringBuilder sb = new StringBuilder(name);
+        int changes = random.nextInt(maxChanges) + 1;
+
+        for (int i = 0; i < changes; i++) {
+            int type = random.nextInt(4);
+            int pos = random.nextInt(sb.length());
+
+            switch (type) {
+                case 0: // Добавить случайный символ
+                    sb.insert(pos, (char) (random.nextInt(26) + 'a'));
+                    break;
+                case 1: // Удалить символ
+                    if (sb.length() > 1) {
+                        sb.deleteCharAt(pos);
+                    }
+                    break;
+                case 2: // Заменить на похожий
+                    char c = sb.charAt(pos);
+                    if (c == 'a') sb.setCharAt(pos, '4');
+                    else if (c == 'e') sb.setCharAt(pos, '3');
+                    else if (c == 'o') sb.setCharAt(pos, '0');
+                    else sb.setCharAt(pos, (char) (c + 1));
+                    break;
+                case 3: // Переставить соседние символы
+                    if (pos < sb.length() - 1) {
+                        char tmp = sb.charAt(pos);
+                        sb.setCharAt(pos, sb.charAt(pos + 1));
+                        sb.setCharAt(pos + 1, tmp);
+                    }
+                    break;
+            }
+        }
+
+        return sb.toString();
+    }
+
+    // ==================== ЭФФЕКТ ПРОМАХА СТРЕЛЬБОЙ ====================
+
+    @EventHandler
+    public void onEntityShootBow(EntityShootBowEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+
+        int level = buzzLevels.getOrDefault(player.getUniqueId(), 0);
+        if (level < MISS_LEVEL_MIN) return;
+
+        // Проверка глобального кулдауна
+        long now = System.currentTimeMillis();
+        long lastEffect = lastEffectTime.getOrDefault(player.getUniqueId(), 0L);
+        long cooldown = getGlobalCooldown(level);
+
+        if (now - lastEffect < cooldown) return;
+
+        Random random = new Random();
+        double missChance;
+
+        if (level >= 81) {
+            missChance = MISS_CHANCE_HIGH;
+        } else if (level >= 61) {
+            missChance = MISS_CHANCE_MED;
+        } else {
+            missChance = MISS_CHANCE_LOW;
+        }
+
+        if (random.nextDouble() < missChance) {
+            // Добавляем случайное отклонение к направлению стрелы
+            org.bukkit.entity.Arrow arrow = (org.bukkit.entity.Arrow) event.getProjectile();
+            Vector direction = arrow.getVelocity();
+
+            double spread = 0.5; // Радиус разброса
+            direction.add(new Vector(
+                    (random.nextDouble() - 0.5) * spread,
+                    (random.nextDouble() - 0.5) * spread,
+                    (random.nextDouble() - 0.5) * spread
+            )).normalize().multiply(arrow.getVelocity().length());
+
+            arrow.setVelocity(direction);
+            lastEffectTime.put(player.getUniqueId(), now);
+        }
+    }
+
+    // ==================== ЭФФЕКТ ПОВОРОТА ГОЛОВЫ ====================
+
+    @EventHandler
+    public void onPlayerMove(PlayerMoveEvent event) {
+        Player player = event.getPlayer();
+        int level = buzzLevels.getOrDefault(player.getUniqueId(), 0);
+        if (level < HEADTWITCH_LEVEL_MIN) return;
+
+        // Проверка глобального кулдауна
+        long now = System.currentTimeMillis();
+        long lastEffect = lastEffectTime.getOrDefault(player.getUniqueId(), 0L);
+        long cooldown = getGlobalCooldown(level);
+
+        if (now - lastEffect < cooldown) return;
+
+        Random random = new Random();
+        double chance;
+        int maxAngle;
+
+        if (level >= 81) {
+            chance = HEADTWITCH_CHANCE_HIGH;
+            maxAngle = HEADTWITCH_ANGLE_HIGH;
+        } else if (level >= 61) {
+            chance = HEADTWITCH_CHANCE_MED;
+            maxAngle = HEADTWITCH_ANGLE_MED;
+        } else {
+            chance = HEADTWITCH_CHANCE_LOW;
+            maxAngle = HEADTWITCH_ANGLE_LOW;
+        }
+
+        // Проверяем каждый тик с шансом
+        if (random.nextDouble() < chance / 20) { // Делим на 20, так как MoveEvent вызывается часто
+            Location loc = player.getLocation();
+            float newYaw = loc.getYaw() + (random.nextFloat() - 0.5f) * 2 * maxAngle;
+            loc.setYaw(newYaw);
+            player.teleport(loc);
+            lastEffectTime.put(player.getUniqueId(), now);
+        }
     }
 
     // ==================== КРАФТ ====================
@@ -798,36 +1663,92 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
         jointRecipe.addIngredient(1, Material.PAPER);
         jointRecipe.addIngredient(1, Material.DEAD_BUSH);
 
-        // Проверяем NBT через слушатель крафта
         Bukkit.addRecipe(jointRecipe);
     }
 
     @EventHandler
-    public void onCraft(org.bukkit.event.inventory.CraftItemEvent event) {
-        ItemStack result = event.getCurrentItem();
-        if (result != null && result.getType() == Material.FIREWORK_ROCKET) {
-            // Проверяем, что использован сухой чай с NBT
-            boolean hasDryTea = false;
+    public void onCraft(CraftItemEvent event) {
+        if (event.isCancelled()) return;
 
-            for (ItemStack item : event.getInventory().getMatrix()) {
-                if (item != null && item.getType() == Material.DEAD_BUSH && item.hasItemMeta()) {
-                    PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-                    if (pdc.has(teaDryKey, PersistentDataType.BOOLEAN)) {
-                        hasDryTea = true;
-                        break;
-                    }
+        // Проверяем, что это крафт нашей скрутки
+        ItemStack result = event.getCurrentItem();
+        if (result == null || result.getType() != Material.FIREWORK_ROCKET) return;
+
+        // Проверяем, что использован сухой чай с NBT
+        boolean hasDryTea = false;
+
+        for (ItemStack item : event.getInventory().getMatrix()) {
+            if (item != null && item.getType() == Material.DEAD_BUSH && item.hasItemMeta()) {
+                PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
+                if (pdc.has(teaDryKey, PersistentDataType.BOOLEAN)) {
+                    hasDryTea = true;
+                    break;
                 }
             }
+        }
 
-            if (hasDryTea) {
-                // Заменяем результат на наши скрутки
-                event.setCurrentItem(createTeaJointItem());
-                event.getCurrentItem().setAmount(2); // 2 скрутки
-            }
+        if (!hasDryTea) {
+            // Если нет сухого чая, отменяем крафт
+            event.setCancelled(true);
+            return;
+        }
+
+        // Обработка Shift+ПКМ
+        if (event.isShiftClick()) {
+            // При Shift+ПКМ нужно обработать все возможные крафты
+            Bukkit.getScheduler().runTask(this, () -> {
+                ItemStack[] matrix = event.getInventory().getMatrix();
+                int maxCrafts = getMaxCrafts(matrix);
+                ItemStack jointItem = createTeaJointItem();
+                jointItem.setAmount(2 * maxCrafts);
+
+                // Добавляем предметы игроку
+                Player player = (Player) event.getWhoClicked();
+                HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(jointItem);
+
+                // Если не влезло, выбрасываем
+                if (!leftover.isEmpty()) {
+                    for (ItemStack item : leftover.values()) {
+                        player.getWorld().dropItemNaturally(player.getLocation(), item);
+                    }
+                }
+
+                // Убираем использованные ингредиенты
+                for (int i = 0; i < matrix.length; i++) {
+                    if (matrix[i] != null) {
+                        matrix[i].setAmount(matrix[i].getAmount() - 1);
+                    }
+                }
+                event.getInventory().setMatrix(matrix);
+            });
+        } else {
+            // Обычный крафт
+            event.setCurrentItem(createTeaJointItem());
+            event.getCurrentItem().setAmount(2); // 2 скрутки
         }
     }
 
-// ==================== БАЗА ДАННЫХ ====================
+    private int getMaxCrafts(ItemStack[] matrix) {
+        int paperCount = 0;
+        int dryTeaCount = 0;
+
+        for (ItemStack item : matrix) {
+            if (item == null) continue;
+
+            if (item.getType() == Material.PAPER) {
+                paperCount += item.getAmount();
+            } else if (item.getType() == Material.DEAD_BUSH && item.hasItemMeta()) {
+                PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
+                if (pdc.has(teaDryKey, PersistentDataType.BOOLEAN)) {
+                    dryTeaCount += item.getAmount();
+                }
+            }
+        }
+
+        return Math.min(paperCount, dryTeaCount);
+    }
+
+    // ==================== БАЗА ДАННЫХ ====================
 
     private void initDatabase() {
         try {
@@ -864,7 +1785,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(world, x, y, z)
                 )
-            """);
+                """);
 
                 // Создаем индексы для быстрого поиска
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_world_coords ON tea_bushes(world, x, y, z)");
@@ -976,7 +1897,7 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
         String sql = """
         INSERT OR REPLACE INTO tea_bushes (world, x, y, z, plant_time, is_mature, updated_at) 
         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    """;
+        """;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, loc.getWorld().getName());
@@ -1056,26 +1977,14 @@ public final class ZZZ_teacraft extends JavaPlugin implements Listener {
         });
     }
 
-    private void cleanupInvalidBushes() {
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            int removedCount = 0;
-            Iterator<Map.Entry<Location, TeaBushData>> iterator = teaBushes.entrySet().iterator();
-
-            while (iterator.hasNext()) {
-                Map.Entry<Location, TeaBushData> entry = iterator.next();
-                Location loc = entry.getKey();
-
-                if (loc.getBlock().getType() != Material.FERN) {
-                    iterator.remove();
-                    deleteTeaBushByLocation(loc);
-                    removeParticles(loc);
-                    removedCount++;
-                }
-            }
-
-            if (removedCount > 0) {
-                getLogger().info("Cleaned up " + removedCount + " invalid tea bushes");
-            }
-        }, 200L, 6000L); // Проверка через 10 секунд после старта, затем каждые 5 минут
+    private String getBuzzBar(int level) {
+        int filled = level / 10;
+        StringBuilder bar = new StringBuilder();
+        bar.append(ChatColor.GREEN);
+        for (int i = 0; i < filled; i++) bar.append("▮");
+        bar.append(ChatColor.GRAY);
+        for (int i = filled; i < 10; i++) bar.append("▯");
+        bar.append(ChatColor.WHITE).append(" ").append(level).append("%");
+        return bar.toString();
     }
 }
