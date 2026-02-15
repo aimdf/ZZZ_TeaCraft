@@ -1,6 +1,9 @@
-// ==================== Файл: DatabaseManager.java ====================
-package com.zzz;
+// ==================== Файл: managers/DatabaseManager.java ====================
+package com.zzz.managers;
 
+import com.zzz.ZZZ_teacraft;
+import com.zzz.TeaBushData;
+import com.zzz.Utils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -11,8 +14,13 @@ import java.sql.*;
 import java.util.Map;
 
 public class DatabaseManager {
+    private final ZZZ_teacraft plugin;
 
-    public static void initDatabase(ZZZ_teacraft plugin) {
+    public DatabaseManager(ZZZ_teacraft plugin) {
+        this.plugin = plugin;
+    }
+
+    public void initDatabase() {
         try {
             if (!plugin.getDataFolder().exists()) {
                 if (plugin.getDataFolder().mkdirs()) {
@@ -58,12 +66,12 @@ public class DatabaseManager {
         }
     }
 
-    public static void checkConnection(ZZZ_teacraft plugin) {
+    public void checkConnection() {
         try {
             Connection connection = plugin.getConnection();
             if (connection == null || connection.isClosed()) {
                 plugin.getLogger().warning("Database connection lost, reconnecting...");
-                initDatabase(plugin);
+                initDatabase();
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to check database connection: " + e.getMessage());
@@ -71,11 +79,11 @@ public class DatabaseManager {
         }
     }
 
-    public static void closeDatabase(ZZZ_teacraft plugin) {
+    public void closeDatabase() {
         try {
             Connection connection = plugin.getConnection();
             if (connection != null && !connection.isClosed()) {
-                saveAllTeaBushes(plugin);
+                saveAllTeaBushes();
                 connection.close();
                 plugin.getLogger().info("Database connection closed");
             }
@@ -85,8 +93,8 @@ public class DatabaseManager {
         }
     }
 
-    public static void loadTeaBushes(ZZZ_teacraft plugin) {
-        checkConnection(plugin);
+    public void loadTeaBushes() {
+        checkConnection();
         Map<Location, TeaBushData> teaBushes = plugin.getTeaBushes();
         teaBushes.clear();
 
@@ -116,7 +124,7 @@ public class DatabaseManager {
 
                 if (loc.getBlock().getType() != Material.FERN) {
                     skippedCount++;
-                    deleteTeaBushByLocation(plugin, loc);
+                    deleteTeaBushByLocation(loc);
                     continue;
                 }
 
@@ -143,13 +151,13 @@ public class DatabaseManager {
         }
     }
 
-    public static void saveTeaBush(ZZZ_teacraft plugin, TeaBushData bushData) {
+    public void saveTeaBush(TeaBushData bushData) {
         if (bushData == null || bushData.getLocation() == null || bushData.getLocation().getWorld() == null) {
             plugin.getLogger().warning("Attempted to save invalid tea bush data");
             return;
         }
 
-        checkConnection(plugin);
+        checkConnection();
         Location loc = bushData.getLocation();
 
         String sql = """
@@ -172,21 +180,21 @@ public class DatabaseManager {
         }
     }
 
-    public static void saveTeaBushAsync(ZZZ_teacraft plugin, TeaBushData bushData) {
+    public void saveTeaBushAsync(TeaBushData bushData) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            saveTeaBush(plugin, bushData);
+            saveTeaBush(bushData);
         });
     }
 
-    public static void deleteTeaBush(ZZZ_teacraft plugin, TeaBushData bushData) {
+    public void deleteTeaBush(TeaBushData bushData) {
         if (bushData == null || bushData.getLocation() == null) return;
-        deleteTeaBushByLocation(plugin, bushData.getLocation());
+        deleteTeaBushByLocation(bushData.getLocation());
     }
 
-    public static void deleteTeaBushByLocation(ZZZ_teacraft plugin, Location loc) {
+    public void deleteTeaBushByLocation(Location loc) {
         if (loc == null || loc.getWorld() == null) return;
 
-        checkConnection(plugin);
+        checkConnection();
         String sql = "DELETE FROM tea_bushes WHERE world = ? AND x = ? AND y = ? AND z = ?";
 
         try (PreparedStatement pstmt = plugin.getConnection().prepareStatement(sql)) {
@@ -194,11 +202,7 @@ public class DatabaseManager {
             pstmt.setInt(2, loc.getBlockX());
             pstmt.setInt(3, loc.getBlockY());
             pstmt.setInt(4, loc.getBlockZ());
-            int deleted = pstmt.executeUpdate();
-
-            if (deleted > 0) {
-                plugin.getLogger().fine("Deleted tea bush at " + loc);
-            }
+            pstmt.executeUpdate();
 
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to delete tea bush at " + loc + ": " + e.getMessage());
@@ -206,13 +210,13 @@ public class DatabaseManager {
         }
     }
 
-    public static void deleteTeaBushAsync(ZZZ_teacraft plugin, TeaBushData bushData) {
+    public void deleteTeaBushAsync(TeaBushData bushData) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            deleteTeaBush(plugin, bushData);
+            deleteTeaBush(bushData);
         });
     }
 
-    public static void saveAllTeaBushes(ZZZ_teacraft plugin) {
+    public void saveAllTeaBushes() {
         Map<Location, TeaBushData> teaBushes = plugin.getTeaBushes();
         if (teaBushes.isEmpty()) {
             plugin.getLogger().info("No tea bushes to save");
@@ -223,16 +227,16 @@ public class DatabaseManager {
         int savedCount = 0;
 
         for (TeaBushData bushData : teaBushes.values()) {
-            saveTeaBush(plugin, bushData);
+            saveTeaBush(bushData);
             savedCount++;
         }
 
         plugin.getLogger().info("Saved " + savedCount + " tea bushes");
     }
 
-    public static void saveAllTeaBushesAsync(ZZZ_teacraft plugin) {
+    public void saveAllTeaBushesAsync() {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            saveAllTeaBushes(plugin);
+            saveAllTeaBushes();
         });
     }
 }

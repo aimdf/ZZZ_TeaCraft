@@ -1,21 +1,24 @@
-// ==================== Файл: Constants.java ====================
+// ==================== Файл: Constants.java (обновленный) ====================
 package com.zzz;
 
 public final class Constants {
-    private Constants() {} // Prevent instantiation
+    private Constants() {}
 
     // ==================== ОСНОВНЫЕ КОНСТАНТЫ ====================
-    public static final int GROW_TIME = 300; // 5 минут в секундах
-    public static final int DRY_TIME = 300; // 5 минут для сушки
+    public static final int GROW_TIME = 300;
+    public static final int DRY_TIME = 300;
     public static final int BUZZ_INCREMENT = 20;
     public static final int WATER_REDUCTION = 30;
     public static final int NATURAL_DECAY = 1;
-    public static final long DECAY_INTERVAL = 1200; // 1 минута в тиках
+    public static final long DECAY_INTERVAL = 1200;
+
+    // ==================== МИНИМАЛЬНЫЙ УРОВЕНЬ ДЛЯ ЭФФЕКТОВ ====================
+    public static final int EFFECTS_LEVEL_MIN = 31;
 
     // ==================== ГЛОБАЛЬНЫЙ КУЛДАУН ЭФФЕКТОВ ====================
-    public static final long GLOBAL_COOLDOWN_LOW = 600; // 30 секунд
-    public static final long GLOBAL_COOLDOWN_MED = 400; // 20 секунд
-    public static final long GLOBAL_COOLDOWN_HIGH = 200; // 10 секунд
+    public static final long GLOBAL_COOLDOWN_LOW = 600;
+    public static final long GLOBAL_COOLDOWN_MED = 400;
+    public static final long GLOBAL_COOLDOWN_HIGH = 200;
 
     // ==================== НАСТРОЙКИ ЭФФЕКТОВ ====================
     // Темнота
@@ -135,7 +138,6 @@ public final class Constants {
     public static final float SOUND_VOLUME_LOW = 0.5f;
     public static final float SOUND_VOLUME_MED = 0.8f;
     public static final float SOUND_VOLUME_HIGH = 1.0f;
-    public static final float SOUND_PITCH = 1.0f;
 
     // Фантомные частицы
     public static final int PARTICLE_LEVEL_MIN = 31;
