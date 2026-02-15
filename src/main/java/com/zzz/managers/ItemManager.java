@@ -2,6 +2,7 @@
 package com.zzz.managers;
 
 import com.zzz.ZZZ_teacraft;
+import com.zzz.Constants;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
@@ -24,9 +25,23 @@ public class ItemManager {
         ItemStack item = new ItemStack(Material.FERN);
         ItemMeta meta = item.getItemMeta();
         meta.setDisplayName(ChatColor.GREEN + "Куст чая");
+
+        // Обновляем описание с новым временем роста
+        int hours = Constants.GROW_TIME / 3600;
+        int minutes = (Constants.GROW_TIME % 3600) / 60;
+        String timeText;
+        if (hours > 0) {
+            timeText = hours + "ч " + minutes + "м";
+        } else {
+            timeText = minutes + " минут";
+        }
+
         meta.setLore(Arrays.asList(
-                ChatColor.GRAY + "Посадите на землю",
-                ChatColor.GRAY + "Время роста: 5 минут"
+                ChatColor.GRAY + "🌱 Посадите на землю",
+                ChatColor.GRAY + "⏱ Время роста: " + timeText,
+                ChatColor.GRAY + "💧 Требует полива",
+                ChatColor.GRAY + "✂️ Собирать ножницами",
+                ChatColor.GRAY + "🔍 Стекло - информация"
         ));
         meta.getPersistentDataContainer().set(plugin.getTeaBushKey(), PersistentDataType.BOOLEAN, true);
         item.setItemMeta(meta);

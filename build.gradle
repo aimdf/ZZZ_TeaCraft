@@ -15,14 +15,13 @@ repositories {
 }
 
 dependencies {
-    // Используем правильную версию API для Minecraft 1.21
-    compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
+    compileOnly 'io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT'
 }
 
 tasks {
     runServer {
         // Minecraft версия должна соответствовать API
-        minecraftVersion("1.21.1")
+        minecraftVersion("1.21")
     }
 }
 

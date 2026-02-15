@@ -1,4 +1,4 @@
-// ==================== Файл: ZZZ_teacraft.java (полностью исправленный) ====================
+// ==================== Файл: ZZZ_teacraft.java (ОПТИМИЗИРОВАННЫЙ) ====================
 package com.zzz;
 
 import com.zzz.managers.*;
@@ -14,8 +14,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.sql.Connection;
 import java.util.Map;
-import java.util.UUID; // ← Этого импорта не хватало!
-import java.util.Objects; // ← И этого!
+import java.util.UUID;
+import java.util.Objects;
 
 public final class ZZZ_teacraft extends JavaPlugin {
 
@@ -32,6 +32,7 @@ public final class ZZZ_teacraft extends JavaPlugin {
     private BushManager bushManager;
     private DatabaseManager databaseManager;
     private ItemManager itemManager;
+    private DialogManager dialogManager;
 
     // ==================== База данных ====================
     private Connection connection;
@@ -43,6 +44,8 @@ public final class ZZZ_teacraft extends JavaPlugin {
     private BukkitTask combinedEffectsTask;
     private BukkitTask itemRenameTask;
     private BukkitTask cleanupTask;
+    private BukkitTask particleTask;
+    private BukkitTask moistureDrainTask; // НОВЫЙ ТАСК
 
     @Override
     public void onEnable() {
@@ -54,7 +57,7 @@ public final class ZZZ_teacraft extends JavaPlugin {
         startAllTasks();
         registerCommands();
         registerRecipes();
-        getLogger().info("ZZZ_TeaCraft включен!");
+        getLogger().info("ZZZ_TeaCraft включен! Версия: 1.3.0 (оптимизированная)");
     }
 
     @Override
@@ -78,7 +81,8 @@ public final class ZZZ_teacraft extends JavaPlugin {
         this.buzzManager = new BuzzManager(this);
         this.bushManager = new BushManager(this);
         this.itemManager = new ItemManager(this);
-        this.databaseManager = new DatabaseManager(this); // теперь работает!
+        this.databaseManager = new DatabaseManager(this);
+        this.dialogManager = new DialogManager(this);
     }
 
     private void registerListeners() {
@@ -94,12 +98,14 @@ public final class ZZZ_teacraft extends JavaPlugin {
     }
 
     private void startAllTasks() {
-        bushGrowthTask = new BushGrowthTask(this).runTaskTimer(this, 20L, 20L);
+        bushGrowthTask = new BushGrowthTask(this).runTaskTimer(this, 20L, 1L); // Каждый тик, но с проверкой
         itemFrameCheckTask = new ItemFrameCheckTask(this).runTaskTimer(this, 20L, 100L);
         buzzDecayTask = new BuzzDecayTask(this).runTaskTimer(this, 0L, Constants.DECAY_INTERVAL);
-        combinedEffectsTask = new CombinedEffectsTask(this).runTaskTimer(this, 20L, 1L);
+        combinedEffectsTask = new CombinedEffectsTask(this).runTaskTimer(this, 20L, 3L); // УВЕЛИЧЕНО ДО 3 ТИКОВ
         itemRenameTask = new ItemRenameTask(this).runTaskTimer(this, 20L, 200L);
         cleanupTask = new CleanupTask(this).runTaskTimer(this, 200L, 6000L);
+        particleTask = new ParticleTask(this).runTaskTimer(this, 20L, 10L);
+        moistureDrainTask = new MoistureDrainTask(this).runTaskTimer(this, 1200L, 1200L); // НОВЫЙ ТАСК (каждую минуту)
     }
 
     private void cancelAllTasks() {
@@ -109,6 +115,8 @@ public final class ZZZ_teacraft extends JavaPlugin {
         if (combinedEffectsTask != null) combinedEffectsTask.cancel();
         if (itemRenameTask != null) itemRenameTask.cancel();
         if (cleanupTask != null) cleanupTask.cancel();
+        if (particleTask != null) particleTask.cancel();
+        if (moistureDrainTask != null) moistureDrainTask.cancel();
     }
 
     private void registerRecipes() {
@@ -127,6 +135,7 @@ public final class ZZZ_teacraft extends JavaPlugin {
     public BushManager getBushManager() { return bushManager; }
     public DatabaseManager getDatabaseManager() { return databaseManager; }
     public ItemManager getItemManager() { return itemManager; }
+    public DialogManager getDialogManager() { return dialogManager; }
 
     public Connection getConnection() { return connection; }
     public void setConnection(Connection connection) { this.connection = connection; }

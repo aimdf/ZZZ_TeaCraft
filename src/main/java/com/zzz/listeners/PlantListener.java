@@ -1,9 +1,10 @@
-// ==================== Файл: PlantListener.java ====================
+// ==================== Файл: listeners/PlantListener.java ====================
 package com.zzz.listeners;
 
 import com.zzz.TeaBushData;
 import com.zzz.Utils;
 import com.zzz.ZZZ_teacraft;
+import com.zzz.Constants;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
@@ -17,11 +18,14 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionType;
 
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 public class PlantListener implements Listener {
     private final ZZZ_teacraft plugin;
@@ -41,6 +45,7 @@ public class PlantListener implements Listener {
             Location loc = block.getLocation();
 
             TeaBushData bushData = new TeaBushData(loc, System.currentTimeMillis(), false);
+            bushData.setPlantedBy(event.getPlayer().getUniqueId()); // запоминаем кто посадил
             plugin.getTeaBushes().put(loc, bushData);
             plugin.saveTeaBush(bushData);
         }
@@ -107,7 +112,16 @@ public class PlantListener implements Listener {
         TeaBushData bushData = plugin.getTeaBushes().get(block.getLocation());
         if (bushData == null) return;
 
-        if (tool.getType() == Material.SHEARS && bushData.isMature()) {
+        // Проверяем что в руке - стекло для информации или ножницы для сбора
+        if (tool.getType() == Material.GLASS_PANE) {
+            // Отменяем событие
+            event.setCancelled(true);
+
+            // Показываем информацию в чате
+            plugin.getDialogManager().showBushInfo(player, bushData);
+
+        } else if (tool.getType() == Material.SHEARS && bushData.isMature()) {
+            // Сбор урожая
             event.setCancelled(true);
 
             Random random = new Random();
@@ -123,7 +137,67 @@ public class PlantListener implements Listener {
             Utils.removeParticles(block.getLocation());
             bushData.setMature(false);
             bushData.setPlantTime(System.currentTimeMillis());
+            // При сборе урожая влажность сбрасывается до 100%
+            bushData.water(Constants.MAX_MOISTURE);
             plugin.saveTeaBush(bushData);
         }
+    }
+
+    @EventHandler
+    public void onWaterBottleUse(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (event.getHand() != EquipmentSlot.HAND) return;
+
+        Player player = event.getPlayer();
+        ItemStack item = player.getInventory().getItemInMainHand();
+
+        // Проверяем, что это бутылка с водой
+        if (item.getType() != Material.POTION) return;
+
+        PotionMeta meta = (PotionMeta) item.getItemMeta();
+        if (meta == null || meta.getBasePotionType() != PotionType.WATER) return;
+
+        Block block = event.getClickedBlock();
+        if (block == null || block.getType() != Material.FERN) return;
+
+        TeaBushData bushData = plugin.getTeaBushes().get(block.getLocation());
+        if (bushData == null) return;
+
+        // Нельзя поливать зрелый куст
+        if (bushData.isMature()) {
+            player.sendMessage("§cНельзя поливать зрелый куст!");
+            return;
+        }
+
+        event.setCancelled(true);
+
+        // Запоминаем старую влажность для сообщения
+        int oldMoisture = bushData.getMoisture();
+
+        // Полив
+        bushData.water(Constants.WATER_BOTTLE_AMOUNT);
+
+        int newMoisture = bushData.getMoisture();
+
+        // Убираем одну бутылку
+        item.setAmount(item.getAmount() - 1);
+
+        // Возвращаем стеклянную бутылку
+        if (item.getAmount() <= 0) {
+            player.getInventory().setItemInMainHand(new ItemStack(Material.GLASS_BOTTLE));
+        } else {
+            player.getInventory().addItem(new ItemStack(Material.GLASS_BOTTLE));
+        }
+
+        player.sendMessage("§a💧 Вы полили куст! §7" + oldMoisture + "% → §b" + newMoisture + "%");
+
+        // Сохраняем изменения
+        plugin.saveTeaBush(bushData);
+
+        // Эффекты полива
+        player.getWorld().spawnParticle(Particle.SPLASH,
+                block.getLocation().add(0.5, 1, 0.5), 10, 0.2, 0.2, 0.2);
+        player.getWorld().spawnParticle(Particle.FALLING_WATER,
+                block.getLocation().add(0.5, 1, 0.5), 20, 0.2, 0.2, 0.2, 0.1);
     }
 }

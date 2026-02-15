@@ -1,10 +1,9 @@
-// ==================== Файл: tasks/BushGrowthTask.java ====================
+// ==================== Файл: tasks/BushGrowthTask.java (ОПТИМИЗИРОВАННЫЙ) ====================
 package com.zzz.tasks;
 
 import com.zzz.ZZZ_teacraft;
 import com.zzz.TeaBushData;
 import com.zzz.Constants;
-import com.zzz.Utils;
 import org.bukkit.Location;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -12,6 +11,7 @@ import java.util.Map;
 
 public class BushGrowthTask extends BukkitRunnable {
     private final ZZZ_teacraft plugin;
+    private int tickCounter = 0;
 
     public BushGrowthTask(ZZZ_teacraft plugin) {
         this.plugin = plugin;
@@ -21,16 +21,37 @@ public class BushGrowthTask extends BukkitRunnable {
     public void run() {
         long currentTime = System.currentTimeMillis();
         Map<Location, TeaBushData> teaBushes = plugin.getTeaBushes();
+        boolean changed = false;
+
+        tickCounter++;
+
+        // Проверяем рост каждую секунду (20 тиков)
+        if (tickCounter % 20 != 0) return;
 
         for (TeaBushData bushData : teaBushes.values()) {
             if (bushData.isMature()) continue;
 
+            // Получаем текущую влажность (уже актуальна благодаря MoistureDrainTask)
+            int moisture = bushData.getRawMoisture();
+
+            // Вычисляем эффективное время с учетом влажности
             long elapsed = (currentTime - bushData.getPlantTime()) / 1000;
-            if (elapsed >= Constants.GROW_TIME && !bushData.isMature()) {
+
+            double speedMultiplier = Constants.MIN_GROWTH_SPEED +
+                    (moisture / 100.0) * (Constants.MAX_GROWTH_SPEED - Constants.MIN_GROWTH_SPEED);
+
+            long effectiveElapsed = (long)(elapsed * speedMultiplier);
+
+            // Проверяем, созрел ли куст
+            if (effectiveElapsed >= Constants.GROW_TIME && !bushData.isMature()) {
                 bushData.setMature(true);
-                Utils.spawnParticles(bushData.getLocation());
-                plugin.saveTeaBush(bushData);
+                changed = true;
             }
+        }
+
+        // Сохраняем изменения в БД, если были изменения
+        if (changed) {
+            plugin.saveAllTeaBushesAsync();
         }
     }
 }

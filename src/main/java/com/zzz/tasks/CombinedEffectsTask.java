@@ -1,4 +1,4 @@
-// ==================== Файл: tasks/CombinedEffectsTask.java ====================
+// ==================== Файл: tasks/CombinedEffectsTask.java (ОПТИМИЗИРОВАННЫЙ) ====================
 package com.zzz.tasks;
 
 import com.zzz.ZZZ_teacraft;
@@ -20,6 +20,7 @@ public class CombinedEffectsTask extends BukkitRunnable {
     private final Map<UUID, Integer> shakeTicks = new HashMap<>();
     private final Map<UUID, Integer> warpTicks = new HashMap<>();
     private final Map<UUID, Long> lastJumpTime = new HashMap<>();
+    private final Map<UUID, Long> lastEffectCheck = new HashMap<>(); // Кэш для проверки эффектов
 
     // Звуки для эффектов
     private final Sound[] scarySounds = {
@@ -54,81 +55,101 @@ public class CombinedEffectsTask extends BukkitRunnable {
 
     @Override
     public void run() {
+        long currentTime = System.currentTimeMillis();
+
         for (Player player : plugin.getServer().getOnlinePlayers()) {
+            UUID uuid = player.getUniqueId();
             int level = buzzManager.getLevel(player);
+
             if (level < Constants.EFFECTS_LEVEL_MIN) {
                 // Очищаем временные эффекты если уровень слишком низкий
-                shakeTicks.remove(player.getUniqueId());
-                warpTicks.remove(player.getUniqueId());
+                shakeTicks.remove(uuid);
+                warpTicks.remove(uuid);
+                lastEffectCheck.remove(uuid);
                 continue;
             }
 
-            // Применяем все эффекты в одном таске
-            applyMovementEffects(player, level);
+            // Проверяем, нужно ли применять эффекты в этом тике (кэширование)
+            Long lastCheck = lastEffectCheck.get(uuid);
+            if (lastCheck != null && currentTime - lastCheck < 150) { // ~3 тика
+                // Пропускаем проверку эффектов, но продолжаем активные эффекты
+                applyActiveEffects(player, level);
+                continue;
+            }
+            lastEffectCheck.put(uuid, currentTime);
+
+            // Применяем все эффекты с нормальной частотой
+            applyMovementEffects(player, level, currentTime);
             applySoundEffects(player, level);
             applyVisualEffects(player, level);
+            applyActiveEffects(player, level);
         }
     }
 
-    private void applyMovementEffects(Player player, int level) {
+    private void applyActiveEffects(Player player, int level) {
         UUID uuid = player.getUniqueId();
-        long now = System.currentTimeMillis();
 
-        // Прыжки
-        if (level >= Constants.JUMP_LEVEL_MIN && player.isOnGround()) {
+        // Продолжаем активную тряску если есть
+        if (shakeTicks.containsKey(uuid)) {
+            int ticksLeft = shakeTicks.get(uuid) - 1;
+            if (ticksLeft <= 0) {
+                shakeTicks.remove(uuid);
+            } else {
+                shakeTicks.put(uuid, ticksLeft);
+                applyCameraShake(player, level);
+            }
+        }
+
+        // Продолжаем активный варп если есть
+        if (warpTicks.containsKey(uuid)) {
+            int ticksLeft = warpTicks.get(uuid) - 1;
+            if (ticksLeft <= 0) {
+                warpTicks.remove(uuid);
+            } else {
+                warpTicks.put(uuid, ticksLeft);
+            }
+        }
+    }
+
+    private void applyMovementEffects(Player player, int level, long currentTime) {
+        UUID uuid = player.getUniqueId();
+
+        // Прыжки - проверяем реже
+        if (level >= Constants.JUMP_LEVEL_MIN && player.isOnGround() && random.nextInt(3) == 0) {
             double jumpChance = getJumpChance(level);
-            long lastJump = lastJumpTime.getOrDefault(uuid, 0L);
+            Long lastJump = lastJumpTime.get(uuid);
 
-            if (now - lastJump > 1000 && random.nextDouble() < jumpChance / 20) {
+            if ((lastJump == null || currentTime - lastJump > 1000) && random.nextDouble() < jumpChance) {
                 Vector velocity = player.getVelocity();
                 velocity.setY(getJumpPower(level));
                 player.setVelocity(velocity);
-                lastJumpTime.put(uuid, now);
+                lastJumpTime.put(uuid, currentTime);
             }
         }
 
-        // Тряска камеры
-        if (level >= Constants.SHAKE_LEVEL_MIN) {
-            if (shakeTicks.containsKey(uuid)) {
-                int ticksLeft = shakeTicks.get(uuid) - 1;
-                if (ticksLeft <= 0) {
-                    shakeTicks.remove(uuid);
-                } else {
-                    shakeTicks.put(uuid, ticksLeft);
-                    applyCameraShake(player, level);
-                }
-            } else {
-                double shakeChance = getShakeChance(level);
-                if (random.nextDouble() < shakeChance / 20) {
-                    shakeTicks.put(uuid, getShakeDuration(level));
-                }
+        // Тряска камеры - проверяем новые эффекты реже
+        if (level >= Constants.SHAKE_LEVEL_MIN && !shakeTicks.containsKey(uuid) && random.nextInt(4) == 0) {
+            double shakeChance = getShakeChance(level);
+            if (random.nextDouble() < shakeChance) {
+                shakeTicks.put(uuid, getShakeDuration(level));
             }
         }
 
-        // Варп скорости
-        if (level >= Constants.SPEEDWARP_LEVEL_MIN) {
-            if (warpTicks.containsKey(uuid)) {
-                int ticksLeft = warpTicks.get(uuid) - 1;
-                if (ticksLeft <= 0) {
-                    warpTicks.remove(uuid);
-                } else {
-                    warpTicks.put(uuid, ticksLeft);
-                }
-            } else {
-                double warpChance = getWarpChance(level);
-                if (random.nextDouble() < warpChance / 20) {
-                    warpTicks.put(uuid, getWarpDuration(level));
-                    applySpeedWarp(player, level);
-                }
+        // Варп скорости - проверяем новые эффекты реже
+        if (level >= Constants.SPEEDWARP_LEVEL_MIN && !warpTicks.containsKey(uuid) && random.nextInt(4) == 0) {
+            double warpChance = getWarpChance(level);
+            if (random.nextDouble() < warpChance) {
+                warpTicks.put(uuid, getWarpDuration(level));
+                applySpeedWarp(player, level);
             }
         }
     }
 
     private void applySoundEffects(Player player, int level) {
-        if (level < Constants.SOUND_LEVEL_MIN) return;
+        if (level < Constants.SOUND_LEVEL_MIN || random.nextInt(3) != 0) return;
 
         double soundChance = getSoundChance(level);
-        if (random.nextDouble() < soundChance / 20) {
+        if (random.nextDouble() < soundChance) {
             Sound[] sounds = getSoundSet(level);
             Sound sound = sounds[random.nextInt(sounds.length)];
             float volume = getSoundVolume(level);
@@ -137,10 +158,10 @@ public class CombinedEffectsTask extends BukkitRunnable {
     }
 
     private void applyVisualEffects(Player player, int level) {
-        if (level < Constants.PARTICLE_LEVEL_MIN) return;
+        if (level < Constants.PARTICLE_LEVEL_MIN || random.nextInt(4) != 0) return;
 
         double particleChance = getParticleChance(level);
-        if (random.nextDouble() < particleChance / 20) {
+        if (random.nextDouble() < particleChance) {
             Particle[] particles = getParticleSet(level);
             Particle particle = particles[random.nextInt(particles.length)];
             Location loc = player.getLocation().add(
@@ -206,11 +227,6 @@ public class CombinedEffectsTask extends BukkitRunnable {
     }
 
     private void applySpeedWarp(Player player, int level) {
-        int amplifier = level >= 81 ? Constants.SPEEDWARP_AMPLIFIER_HIGH :
-                level >= 61 ? Constants.SPEEDWARP_AMPLIFIER_MED :
-                        Constants.SPEEDWARP_AMPLIFIER_LOW;
-        int duration = getWarpDuration(level);
-
         if (random.nextBoolean()) {
             player.setVelocity(player.getVelocity().multiply(1.5));
         } else {

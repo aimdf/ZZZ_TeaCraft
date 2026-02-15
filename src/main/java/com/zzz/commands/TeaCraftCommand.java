@@ -117,7 +117,9 @@ public class TeaCraftCommand implements CommandExecutor {
         player.sendMessage(ChatColor.YELLOW + "Стадия: " + ChatColor.WHITE +
                 (bushData.isMature() ? "§aЗрелый" : "§eРастет"));
         player.sendMessage(ChatColor.YELLOW + "Прогресс: " + ChatColor.WHITE +
-                bushData.getGrowthProgress() + "%");
+                bushData.getEffectiveGrowthProgress() + "%"); // ← ИСПРАВЛЕНО!
+        player.sendMessage(ChatColor.YELLOW + "Влажность: " + ChatColor.WHITE +
+                bushData.getMoisture() + "%");
         return true;
     }
 

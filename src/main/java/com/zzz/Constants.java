@@ -1,16 +1,28 @@
-// ==================== Файл: Constants.java (обновленный) ====================
+// ==================== Файл: Constants.java (С ДОБАВЛЕННЫМИ КОНСТАНТАМИ) ====================
 package com.zzz;
 
 public final class Constants {
     private Constants() {}
 
     // ==================== ОСНОВНЫЕ КОНСТАНТЫ ====================
-    public static final int GROW_TIME = 300;
+    public static final int GROW_TIME = 14400; // Увеличили с 300 до 14400 секунд (4 часа)
     public static final int DRY_TIME = 300;
     public static final int BUZZ_INCREMENT = 20;
     public static final int WATER_REDUCTION = 30;
     public static final int NATURAL_DECAY = 1;
     public static final long DECAY_INTERVAL = 1200;
+
+    // ==================== НОВЫЕ КОНСТАНТЫ ДЛЯ ПОЛИВА ====================
+    public static final int MAX_MOISTURE = 100;
+    public static final int MIN_MOISTURE = 0;
+    public static final int MOISTURE_DRAIN_RATE = 1; // % в минуту
+    public static final long MOISTURE_DRAIN_INTERVAL = 1200; // тиков (1 минута)
+    public static final int WATER_BOTTLE_AMOUNT = 30; // +30% влажности за бутылку
+    public static final double MIN_GROWTH_SPEED = 0.1; // 10% от базовой скорости при 0% влажности
+    public static final double MAX_GROWTH_SPEED = 1.0; // 100% при 100% влажности
+
+    // Ключ для диалогов
+    public static final String DIALOG_BUSH_INFO_KEY = "teacraft:bush_info";
 
     // ==================== МИНИМАЛЬНЫЙ УРОВЕНЬ ДЛЯ ЭФФЕКТОВ ====================
     public static final int EFFECTS_LEVEL_MIN = 31;

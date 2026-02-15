@@ -1,4 +1,4 @@
-// ==================== Файл: managers/DatabaseManager.java ====================
+// ==================== Файл: managers/DatabaseManager.java (ОПТИМИЗИРОВАННЫЙ) ====================
 package com.zzz.managers;
 
 import com.zzz.ZZZ_teacraft;
@@ -12,9 +12,11 @@ import org.bukkit.World;
 import java.io.File;
 import java.sql.*;
 import java.util.Map;
+import java.util.UUID;
 
 public class DatabaseManager {
     private final ZZZ_teacraft plugin;
+    private boolean tablesChecked = false; // Флаг для проверки структуры БД
 
     public DatabaseManager(ZZZ_teacraft plugin) {
         this.plugin = plugin;
@@ -38,24 +40,13 @@ public class DatabaseManager {
                 stmt.execute("PRAGMA synchronous = NORMAL;");
             }
 
-            try (Statement stmt = connection.createStatement()) {
-                stmt.execute("""
-                CREATE TABLE IF NOT EXISTS tea_bushes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    world VARCHAR(64) NOT NULL,
-                    x INTEGER NOT NULL,
-                    y INTEGER NOT NULL,
-                    z INTEGER NOT NULL,
-                    plant_time BIGINT NOT NULL,
-                    is_mature BOOLEAN NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(world, x, y, z)
-                )
-                """);
+            // Создаем таблицу если её нет
+            createTables();
 
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_world_coords ON tea_bushes(world, x, y, z)");
-                stmt.execute("CREATE INDEX IF NOT EXISTS idx_is_mature ON tea_bushes(is_mature)");
+            // Проверяем структуру только при первом запуске
+            if (!tablesChecked) {
+                checkDatabaseStructure();
+                tablesChecked = true;
             }
 
             plugin.getLogger().info("Database initialized successfully at: " + dbFile.getAbsolutePath());
@@ -63,6 +54,62 @@ public class DatabaseManager {
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to initialize database: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    private void createTables() throws SQLException {
+        try (Statement stmt = plugin.getConnection().createStatement()) {
+            stmt.execute("""
+            CREATE TABLE IF NOT EXISTS tea_bushes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                world VARCHAR(64) NOT NULL,
+                x INTEGER NOT NULL,
+                y INTEGER NOT NULL,
+                z INTEGER NOT NULL,
+                plant_time BIGINT NOT NULL,
+                is_mature BOOLEAN NOT NULL DEFAULT 0,
+                moisture INTEGER NOT NULL DEFAULT 100,
+                last_moisture_update BIGINT NOT NULL,
+                planted_by VARCHAR(36),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(world, x, y, z)
+            )
+            """);
+
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_world_coords ON tea_bushes(world, x, y, z)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_is_mature ON tea_bushes(is_mature)");
+        }
+    }
+
+    private void checkDatabaseStructure() throws SQLException {
+        try (Statement stmt = plugin.getConnection().createStatement()) {
+            // Проверяем наличие колонок
+            ResultSet rs = stmt.executeQuery("PRAGMA table_info(tea_bushes)");
+            boolean hasMoisture = false;
+            boolean hasLastMoistureUpdate = false;
+            boolean hasPlantedBy = false;
+
+            while (rs.next()) {
+                String name = rs.getString("name");
+                if (name.equals("moisture")) hasMoisture = true;
+                if (name.equals("last_moisture_update")) hasLastMoistureUpdate = true;
+                if (name.equals("planted_by")) hasPlantedBy = true;
+            }
+            rs.close();
+
+            if (!hasMoisture) {
+                stmt.execute("ALTER TABLE tea_bushes ADD COLUMN moisture INTEGER NOT NULL DEFAULT 100");
+                plugin.getLogger().info("Added moisture column to database");
+            }
+            if (!hasLastMoistureUpdate) {
+                stmt.execute("ALTER TABLE tea_bushes ADD COLUMN last_moisture_update BIGINT NOT NULL DEFAULT 0");
+                plugin.getLogger().info("Added last_moisture_update column to database");
+            }
+            if (!hasPlantedBy) {
+                stmt.execute("ALTER TABLE tea_bushes ADD COLUMN planted_by VARCHAR(36)");
+                plugin.getLogger().info("Added planted_by column to database");
+            }
         }
     }
 
@@ -128,11 +175,22 @@ public class DatabaseManager {
                     continue;
                 }
 
-                TeaBushData bushData = new TeaBushData(
-                        loc,
-                        rs.getLong("plant_time"),
-                        rs.getBoolean("is_mature")
-                );
+                long plantTime = rs.getLong("plant_time");
+                boolean isMature = rs.getBoolean("is_mature");
+                int moisture = rs.getInt("moisture");
+                long lastMoistureUpdate = rs.getLong("last_moisture_update");
+
+                TeaBushData bushData = new TeaBushData(loc, plantTime, isMature, moisture, lastMoistureUpdate);
+
+                // Загружаем planted_by если есть
+                try {
+                    String plantedByStr = rs.getString("planted_by");
+                    if (plantedByStr != null && !plantedByStr.isEmpty()) {
+                        bushData.setPlantedBy(UUID.fromString(plantedByStr));
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки с planted_by
+                }
 
                 teaBushes.put(loc, bushData);
                 loadedCount++;
@@ -161,8 +219,8 @@ public class DatabaseManager {
         Location loc = bushData.getLocation();
 
         String sql = """
-        INSERT OR REPLACE INTO tea_bushes (world, x, y, z, plant_time, is_mature, updated_at) 
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT OR REPLACE INTO tea_bushes (world, x, y, z, plant_time, is_mature, moisture, last_moisture_update, planted_by, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """;
 
         try (PreparedStatement pstmt = plugin.getConnection().prepareStatement(sql)) {
@@ -172,6 +230,16 @@ public class DatabaseManager {
             pstmt.setInt(4, loc.getBlockZ());
             pstmt.setLong(5, bushData.getPlantTime());
             pstmt.setBoolean(6, bushData.isMature());
+            pstmt.setInt(7, bushData.getRawMoisture());
+            pstmt.setLong(8, bushData.getLastMoistureUpdate());
+
+            UUID plantedBy = bushData.getPlantedBy();
+            if (plantedBy != null) {
+                pstmt.setString(9, plantedBy.toString());
+            } else {
+                pstmt.setNull(9, Types.VARCHAR);
+            }
+
             pstmt.executeUpdate();
 
         } catch (SQLException e) {
@@ -224,14 +292,57 @@ public class DatabaseManager {
         }
 
         plugin.getLogger().info("Saving " + teaBushes.size() + " tea bushes...");
-        int savedCount = 0;
 
-        for (TeaBushData bushData : teaBushes.values()) {
-            saveTeaBush(bushData);
-            savedCount++;
+        checkConnection();
+        String sql = """
+        INSERT OR REPLACE INTO tea_bushes (world, x, y, z, plant_time, is_mature, moisture, last_moisture_update, planted_by, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """;
+
+        try (PreparedStatement pstmt = plugin.getConnection().prepareStatement(sql)) {
+            int savedCount = 0;
+
+            for (TeaBushData bushData : teaBushes.values()) {
+                if (bushData == null || bushData.getLocation() == null || bushData.getLocation().getWorld() == null) {
+                    continue;
+                }
+
+                Location loc = bushData.getLocation();
+
+                pstmt.setString(1, loc.getWorld().getName());
+                pstmt.setInt(2, loc.getBlockX());
+                pstmt.setInt(3, loc.getBlockY());
+                pstmt.setInt(4, loc.getBlockZ());
+                pstmt.setLong(5, bushData.getPlantTime());
+                pstmt.setBoolean(6, bushData.isMature());
+                pstmt.setInt(7, bushData.getRawMoisture());
+                pstmt.setLong(8, bushData.getLastMoistureUpdate());
+
+                UUID plantedBy = bushData.getPlantedBy();
+                if (plantedBy != null) {
+                    pstmt.setString(9, plantedBy.toString());
+                } else {
+                    pstmt.setNull(9, Types.VARCHAR);
+                }
+
+                pstmt.addBatch(); // Добавляем в пакет
+                savedCount++;
+
+                // Выполняем пакет каждые 100 записей для экономии памяти
+                if (savedCount % 100 == 0) {
+                    pstmt.executeBatch();
+                }
+            }
+
+            // Выполняем оставшиеся записи
+            pstmt.executeBatch();
+
+            plugin.getLogger().info("Saved " + teaBushes.size() + " tea bushes");
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to save tea bushes: " + e.getMessage());
+            e.printStackTrace();
         }
-
-        plugin.getLogger().info("Saved " + savedCount + " tea bushes");
     }
 
     public void saveAllTeaBushesAsync() {

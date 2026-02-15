@@ -1,9 +1,9 @@
-// ==================== Файл: Utils.java ====================
+// ==================== Файл: Utils.java (ИСПРАВЛЕННЫЙ) ====================
 package com.zzz;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.Material;
+import org.bukkit.Material; // <- БЫЛ ПРОПУЩЕН ЭТОТ ИМПОРТ
 import org.bukkit.Particle;
 
 import java.util.concurrent.ThreadLocalRandom;
@@ -23,24 +23,30 @@ public class Utils {
 
     public static void spawnParticles(Location location) {
         if (location.getWorld() == null) return;
+        if (!location.isChunkLoaded()) return; // Не спавним частицы в незагруженных чанках
 
         Location center = location.clone().add(0.5, 1.0, 0.5);
 
+        // Используем ThreadLocalRandom для лучшей производительности в многопоточной среде
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        // Основные частицы
         location.getWorld().spawnParticle(
                 Particle.END_ROD,
                 center,
-                8,
-                0.2, 0.2, 0.2,
-                0.02
+                3, // Еще уменьшил количество
+                0.15, 0.15, 0.15,
+                0.01
         );
 
-        if (ThreadLocalRandom.current().nextInt(4) == 0) {
+        // Дополнительные частицы с очень низким шансом
+        if (random.nextInt(20) == 0) { // 5% шанс
             location.getWorld().spawnParticle(
                     Particle.HAPPY_VILLAGER,
                     center,
-                    4,
-                    0.2, 0.3, 0.2,
-                    0.1
+                    2,
+                    0.15, 0.2, 0.15,
+                    0.05
             );
         }
     }
